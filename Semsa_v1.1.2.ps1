@@ -4,18 +4,6 @@
 
 
 
-# Tenta alterar a politica de execucao no inicio do script
-try {
-    if ((Get-ExecutionPolicy) -ne 'Unrestricted') {
-        Start-Process powershell -Verb RunAs -ArgumentList "Set-ExecutionPolicy -ExecutionPolicy Unrestricted -Force"
-        Write-Host "[INFO] Politica de execucao alterada para permitir scripts."
-    }
-} catch {
-    Write-Host "[ALERTA] Execute o PowerShell como administrador e use o comando: Set-ExecutionPolicy Unrestricted" -ForegroundColor Yellow
-}
-
-# Esse comando abaixo da permissao de execucao para scripts powershell na Maquina Local
-# Set-ExecutionPolicy -ExecutionPolicy Undefined -Scope LocalMachine
 
 # Primeiro, definimos todas as funcoes
 function Get-MotherboardAssetTag {
@@ -160,7 +148,7 @@ default {"Erro desconhecido (Codigo: $($driver.ConfigManagerErrorCode))"}
         }
     } else {
         Write-Host "`n[SUCESSO] Todos os drivers estao funcionando corretamente." -ForegroundColor Green
-foz    }
+    }
 
     Write-Host "`nPressione qualquer tecla para continuar..."
     $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
@@ -446,15 +434,15 @@ Enable-NetFirewallRule -DisplayGroup "Remote Desktop" -ErrorAction SilentlyConti
 Enable-NetFirewallRule -DisplayGroup "Assistencia Remota" -ErrorAction SilentlyContinue
 
 # Habilitar e iniciar os servicos necessarios
-\$services = @("TermService", "SessionEnv", "UmRdpService", "RemoteRegistry")
-foreach (\$serviceName in \$services) {
-    \$service = Get-Service -Name \$serviceName -ErrorAction SilentlyContinue
-    if (\$service) {
-        if (\$service.StartType -eq "Disabled") {
-            Set-Service -Name \$serviceName -StartupType Automatic
+`$services = @("TermService", "SessionEnv", "UmRdpService", "RemoteRegistry")
+foreach (`$serviceName in `$services) {
+    `$service = Get-Service -Name `$serviceName -ErrorAction SilentlyContinue
+    if (`$service) {
+        if (`$service.StartType -eq "Disabled") {
+            Set-Service -Name `$serviceName -StartupType Automatic
         }
-        if (\$service.Status -ne "Running") {
-            Start-Service -Name \$serviceName
+        if (`$service.Status -ne "Running") {
+            Start-Service -Name `$serviceName
         }
     }
 }
@@ -772,43 +760,55 @@ function Show-Menu {
     } while ($option -ne "16")
 }
 
-# Funcao para reiniciar o script como administrador
+# Funcao para avisar o usuario como reiniciar o script como administrador
 function Restart-ScriptAsAdmin {
     if (-not ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
         $scriptPath = $MyInvocation.MyCommand.Path
         
-        try {
-            Write-Host "[INFO] Tentando reiniciar o script como administrador..." -ForegroundColor Cyan
-            Write-Host "[INFO] Uma nova janela do PowerShell sera aberta. Por favor, execute o script novamente nela." -ForegroundColor Cyan
-            
-            # Metodo alternativo: criar um atalho que execute como administrador
-            $tempDir = [System.IO.Path]::GetTempPath()
-            $shortcutPath = Join-Path $tempDir "ExecutarComoAdmin.lnk"
-            
-            # Criar um objeto de atalho do Windows
-            $WshShell = New-Object -ComObject WScript.Shell
-            $Shortcut = $WshShell.CreateShortcut($shortcutPath)
-            $Shortcut.TargetPath = "powershell.exe"
-            $Shortcut.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`""
-            $Shortcut.WorkingDirectory = Split-Path $scriptPath -Parent
-            $Shortcut.WindowStyle = 1  # Normal window
-            $Shortcut.Save()
-            
-            # Exibir instrucoes para o usuario
-            Write-Host "[INSTRUCOES] Um atalho foi criado em: $shortcutPath" -ForegroundColor Yellow
-Write-Host "[INSTRUCOES] Por favor, clique com o botao direito neste atalho e selecione 'Executar como administrador'" -ForegroundColor Yellow
-            
-            # Abrir o explorador de arquivos no local do atalho
-            Start-Process explorer.exe -ArgumentList "/select,`"$shortcutPath`""
-            
-            # Aguardar para que o usuario possa ler as instrucoes
-Write-Host "[INFO] Pressione qualquer tecla para continuar sem privilegios administrativos..." -ForegroundColor Cyan
+        if ([string]::IsNullOrEmpty($scriptPath)) {
+            # Execucao na memoria (via iex)
+            Write-Host "`n[INSTRUCOES] O script esta sendo executado da memoria." -ForegroundColor Yellow
+            Write-Host "Para executar como Administrador e ter acesso a todas as funcoes:" -ForegroundColor Cyan
+            Write-Host "1. Abra o Menu Iniciar e digite 'PowerShell'" -ForegroundColor White
+            Write-Host "2. Selecione 'Executar como Administrador'" -ForegroundColor White
+            Write-Host "3. Execute novamente o comando de instalacao (irm ... | iex)" -ForegroundColor White
+            Write-Host "`nPressione qualquer tecla para continuar sem privilegios administrativos..." -ForegroundColor Cyan
             $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
-            
             return $false
-        } catch {
-            Write-Host "[ERRO] Nao foi possivel criar o atalho para execucao administrativa: $($_.Exception.Message)" -ForegroundColor Red
-            return $false
+        } else {
+            try {
+                Write-Host "[INFO] Tentando reiniciar o script como administrador..." -ForegroundColor Cyan
+                Write-Host "[INFO] Uma nova janela do PowerShell sera aberta. Por favor, execute o script novamente nela." -ForegroundColor Cyan
+                
+                # Metodo alternativo: criar um atalho que execute como administrador
+                $tempDir = [System.IO.Path]::GetTempPath()
+                $shortcutPath = Join-Path $tempDir "ExecutarComoAdmin.lnk"
+                
+                # Criar um objeto de atalho do Windows
+                $WshShell = New-Object -ComObject WScript.Shell
+                $Shortcut = $WshShell.CreateShortcut($shortcutPath)
+                $Shortcut.TargetPath = "powershell.exe"
+                $Shortcut.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`""
+                $Shortcut.WorkingDirectory = Split-Path $scriptPath -Parent
+                $Shortcut.WindowStyle = 1  # Normal window
+                $Shortcut.Save()
+                
+                # Exibir instrucoes para o usuario
+                Write-Host "[INSTRUCOES] Um atalho foi criado em: $shortcutPath" -ForegroundColor Yellow
+                Write-Host "[INSTRUCOES] Por favor, clique com o botao direito neste atalho e selecione 'Executar como administrador'" -ForegroundColor Yellow
+                
+                # Abrir o explorador de arquivos no local do atalho
+                Start-Process explorer.exe -ArgumentList "/select,`"$shortcutPath`""
+                
+                # Aguardar para que o usuario possa ler as instrucoes
+                Write-Host "[INFO] Pressione qualquer tecla para continuar sem privilegios administrativos..." -ForegroundColor Cyan
+                $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+                
+                return $false
+            } catch {
+                Write-Host "[ERRO] Nao foi possivel criar o atalho para execucao administrativa: $($_.Exception.Message)" -ForegroundColor Red
+                return $false
+            }
         }
     }
     return $true
@@ -821,16 +821,19 @@ if (-not $isAdmin) {
     Write-Host "`n[AVISO IMPORTANTE] Este script contem funcoes que requerem privilegios administrativos." -ForegroundColor Yellow
 Write-Host "Algumas operacoes podem falhar se o script nao for executado como Administrador." -ForegroundColor Yellow
     
-    $restart = Read-Host "Deseja tentar executar o script como Administrador? (S/N)"
+    $restart = Read-Host "Deseja tentar ser instruido sobre como executar o script como Administrador? (S/N)"
     if ($restart -eq 'S' -or $restart -eq 's') {
         $success = Restart-ScriptAsAdmin
         
         if (-not $success) {
-            Write-Host "`n[ALTERNATIVA] Voce pode fechar este script e abrir o PowerShell manualmente como administrador:" -ForegroundColor Yellow
-Write-Host "1. Clique com o botao direito no icone do PowerShell" -ForegroundColor Yellow
-            Write-Host "2. Selecione 'Executar como administrador'" -ForegroundColor Yellow
-            Write-Host "3. Navegue ate a pasta do script: cd $($PWD.Path)" -ForegroundColor Yellow
-            Write-Host "4. Execute o script: .\$(Split-Path $MyInvocation.MyCommand.Path -Leaf)" -ForegroundColor Yellow
+            $scriptPath = $MyInvocation.MyCommand.Path
+            if (-not [string]::IsNullOrEmpty($scriptPath)) {
+                Write-Host "`n[ALTERNATIVA] Voce pode fechar este script e abrir o PowerShell manualmente como administrador:" -ForegroundColor Yellow
+                Write-Host "1. Clique com o botao direito no icone do PowerShell" -ForegroundColor Yellow
+                Write-Host "2. Selecione 'Executar como administrador'" -ForegroundColor Yellow
+                Write-Host "3. Navegue ate a pasta do script: cd $($PWD.Path)" -ForegroundColor Yellow
+                Write-Host "4. Execute o script: .\$(Split-Path $scriptPath -Leaf)" -ForegroundColor Yellow
+            }
         }
     }
     
@@ -841,3 +844,4 @@ Write-Host "1. Clique com o botao direito no icone do PowerShell" -ForegroundCol
 
 # Por ultimo, executamos o menu
 Show-Menu
+
