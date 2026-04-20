@@ -420,12 +420,16 @@ Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server" 
 # Habilitar a Assistencia Remota
 Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server" -Name "fAllowToGetHelp" -Value 1
 
+# Remover politica que trava a interface (se existir)
+Remove-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" -Name "fAllowToGetHelp" -ErrorAction SilentlyContinue
+
 # Habilitar a Assistencia Remota nas Propriedades do Sistema
-Set-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" -Name "fAllowToGetHelp" -Value 1 -ErrorAction SilentlyContinue
 Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" -Name "fAllowToGetHelp" -Value 1
 
 # Configurar o Firewall para permitir conexoes de Assistencia Remota
 Enable-NetFirewallRule -DisplayGroup "Remote Desktop" -ErrorAction SilentlyContinue
+Enable-NetFirewallRule -DisplayGroup "Área de Trabalho Remota" -ErrorAction SilentlyContinue
+Enable-NetFirewallRule -DisplayGroup "Remote Assistance" -ErrorAction SilentlyContinue
 Enable-NetFirewallRule -DisplayGroup "Assistencia Remota" -ErrorAction SilentlyContinue
 
 # Habilitar e iniciar os servicos necessarios
@@ -498,13 +502,17 @@ Pause
         # Habilitar a Assistencia Remota
         Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server" -Name "fAllowToGetHelp" -Value 1 -ErrorAction SilentlyContinue
         
+        # Remover politica que trava a interface (se existir)
+        Remove-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" -Name "fAllowToGetHelp" -ErrorAction SilentlyContinue
+        
         # Habilitar a Assistencia Remota nas Propriedades do Sistema
-        Set-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" -Name "fAllowToGetHelp" -Value 1 -ErrorAction SilentlyContinue
         Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" -Name "fAllowToGetHelp" -Value 1 -ErrorAction SilentlyContinue
 
         # Metodo 2: Configurar o Firewall para permitir conexoes de Assistencia Remota
         Write-Output " [INFO] Metodo 2: Configurando regras de Firewall..."
         Enable-NetFirewallRule -DisplayGroup "Remote Desktop" -ErrorAction SilentlyContinue
+        Enable-NetFirewallRule -DisplayGroup "Área de Trabalho Remota" -ErrorAction SilentlyContinue
+        Enable-NetFirewallRule -DisplayGroup "Remote Assistance" -ErrorAction SilentlyContinue
         Enable-NetFirewallRule -DisplayGroup "Assistencia Remota" -ErrorAction SilentlyContinue
         
         # Metodo 3: Habilitar e iniciar os servicos necessarios
@@ -575,8 +583,8 @@ Write-Host " [INFO] Algumas verificacoes podem falhar ou retornar resultados inc
         # Verificar servicos
         $termService = Get-Service -Name "TermService" -ErrorAction SilentlyContinue
         
-        # Verificar regras de firewall
-        $firewallRules = Get-NetFirewallRule -DisplayGroup "Remote Desktop" -ErrorAction SilentlyContinue | Where-Object { $_.Enabled -eq $true }
+        # Verificar regras de firewall (Suporta PT-BR e EN-US)
+        $firewallRules = Get-NetFirewallRule -DisplayGroup "Remote Desktop", "Área de Trabalho Remota" -ErrorAction SilentlyContinue | Where-Object { $_.Enabled -eq $true }
         
         # Exibir resultados
         Write-Host "`nResultados do diagnostico da Assistencia Remota:" -ForegroundColor Cyan
