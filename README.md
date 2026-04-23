@@ -2,7 +2,7 @@
 
 Script PowerShell interativo para automatizar tarefas comuns de suporte técnico em ambientes corporativos Windows. Centraliza diagnósticos, configurações e instalações em um único script executável localmente ou remotamente.
 
-**Versão:** 1.1.2 · **Plataforma:** Windows 7 SP1+ / Server 2008 R2+ · **PowerShell:** 5.1+
+**Versão:** 1.1.2 · **Plataforma:** Windows 7 SP1+ / Server 2008 R2+ · **PowerShell:** 5.1+ · [Changelog](CHANGELOG.md)
 
 ---
 
