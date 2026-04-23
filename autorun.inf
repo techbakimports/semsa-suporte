@@ -1,0 +1,5 @@
+[autorun]
+open=SEMSA_SUPORTE.bat
+action=Executar Semsa Suporte
+label=Semsa Suporte
+icon=SEMSA_SUPORTE.bat
