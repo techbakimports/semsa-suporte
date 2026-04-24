@@ -515,6 +515,7 @@ Remove-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal
 
 # Habilitar a Assistencia Remota nas Propriedades do Sistema
 Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" -Name "fAllowToGetHelp" -Value 1
+Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Remote Assistance" -Name "fAllowToGetHelp" -Value 1
 
 # Configurar o Firewall para permitir conexoes de Assistencia Remota
 Enable-NetFirewallRule -DisplayGroup "Remote Desktop" -ErrorAction SilentlyContinue
@@ -597,6 +598,7 @@ Pause
         
         # Habilitar a Assistencia Remota nas Propriedades do Sistema
         Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" -Name "fAllowToGetHelp" -Value 1 -ErrorAction SilentlyContinue
+        Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Remote Assistance" -Name "fAllowToGetHelp" -Value 1 -ErrorAction SilentlyContinue
 
         # Metodo 2: Configurar o Firewall para permitir conexoes de Assistencia Remota
         Write-Output " [INFO] Metodo 2: Configurando regras de Firewall..."
@@ -870,6 +872,7 @@ function Start-AutoPadronizacao {
         Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server" -Name "fAllowToGetHelp" -Value 1 -ErrorAction SilentlyContinue
         Remove-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" -Name "fAllowToGetHelp" -ErrorAction SilentlyContinue
         Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" -Name "fAllowToGetHelp" -Value 1 -ErrorAction SilentlyContinue
+        Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Remote Assistance" -Name "fAllowToGetHelp" -Value 1 -ErrorAction SilentlyContinue
         Enable-NetFirewallRule -DisplayGroup "Remote Desktop" -ErrorAction SilentlyContinue
         Enable-NetFirewallRule -DisplayGroup "Área de Trabalho Remota" -ErrorAction SilentlyContinue
         Enable-NetFirewallRule -DisplayGroup "Remote Assistance" -ErrorAction SilentlyContinue
@@ -1008,14 +1011,16 @@ function Start-AutoPadronizacao {
             @{ Id = "UltraVNC.UltraVNC";            Name = "UltraVNC" }
         )
 
-        Write-Host "  Disparando $($autoPrograms.Count) instalacoes em paralelo..." -ForegroundColor DarkGray
+        Write-Host "  Atualizando fontes do winget..." -ForegroundColor DarkGray
+        winget source update | Out-Null
+        Write-Host "  Disparando $($autoPrograms.Count) instalacoes em paralelo (escalonado)..." -ForegroundColor DarkGray
         Write-Host ""
 
         $jobMap      = @{}
         $timeMap     = @{}
         $globalStart = Get-Date
 
-        # Dispara todos os jobs ao mesmo tempo
+        # Dispara os jobs com intervalo de 8s para evitar conflito no banco do winget
         foreach ($prog in $autoPrograms) {
             $job = Start-Job -ScriptBlock {
                 param($pkgId)
@@ -1024,26 +1029,41 @@ function Start-AutoPadronizacao {
             } -ArgumentList $prog.Id
             $jobMap[$prog.Name]  = $job
             $timeMap[$prog.Name] = Get-Date
-            Write-Host "  [>>] $($prog.Name.PadRight(18)) iniciando..." -ForegroundColor DarkCyan
+            Write-Host "  [>>] $($prog.Name.PadRight(18)) disparado" -ForegroundColor DarkCyan
+
+            # Conta regressiva entre disparos (exceto no ultimo)
+            if ($prog.Name -ne $autoPrograms[-1].Name) {
+                for ($s = 8; $s -ge 1; $s--) {
+                    Write-Host "`r  Proximo em ${s}s...   " -NoNewline -ForegroundColor DarkGray
+                    Start-Sleep -Seconds 1
+                }
+                Write-Host "`r$(' ' * 30)`r" -NoNewline
+            }
         }
 
         Write-Host ""
-        $done        = @{}
-        $prevPending = $autoPrograms.Count
+        $done      = @{}
+        $statusLen = 0
 
-        # Monitora e exibe cada conclusao conforme acontece
+        # Monitora e exibe cada conclusao conforme acontece, com status ao vivo
         while ($done.Count -lt $autoPrograms.Count) {
             foreach ($name in @($jobMap.Keys)) {
                 if ($done.ContainsKey($name)) { continue }
                 $job = $jobMap[$name]
 
                 if ($job.State -notin @("Running", "NotStarted")) {
+                    # Limpa a linha de status antes de imprimir o resultado
+                    if ($statusLen -gt 0) {
+                        Write-Host "`r$(' ' * $statusLen)`r" -NoNewline
+                        $statusLen = 0
+                    }
+
                     $elapsed = [math]::Round(((Get-Date) - $timeMap[$name]).TotalSeconds)
                     $timeStr = if ($elapsed -ge 60) { "$([math]::Floor($elapsed/60))m$($elapsed%60)s" } else { "${elapsed}s" }
 
                     $result   = Receive-Job $job -ErrorAction SilentlyContinue | Select-Object -Last 1
                     $exitCode = if ($result -and $result.ExitCode -ne $null) { $result.ExitCode } else { -1 }
-                    $success  = ($job.State -eq "Completed") -and ($exitCode -eq 0 -or ($result.Output -match "already installed|No applicable update"))
+                    $success  = ($job.State -eq "Completed") -and ($exitCode -eq 0 -or ($result.Output -match "already installed|No applicable update|Nenhuma atualiza"))
                     Remove-Job $job -Force -ErrorAction SilentlyContinue
 
                     if ($success) {
@@ -1057,16 +1077,21 @@ function Start-AutoPadronizacao {
                 }
             }
 
+            # Atualiza linha de status ao vivo (sobrescreve a mesma linha)
             $pending = $autoPrograms.Count - $done.Count
-            if ($pending -gt 0 -and $pending -ne $prevPending) {
+            if ($pending -gt 0) {
                 $elapsed = [math]::Round(((Get-Date) - $globalStart).TotalSeconds)
                 $timeStr = if ($elapsed -ge 60) { "$([math]::Floor($elapsed/60))m$($elapsed%60)s" } else { "${elapsed}s" }
-                Write-Host "  ... $pending app(s) ainda instalando | $timeStr decorridos" -ForegroundColor DarkGray
-                $prevPending = $pending
+                $status  = "  ... $pending app(s) instalando | $timeStr decorridos"
+                $statusLen = $status.Length + 3
+                Write-Host "`r$status   " -NoNewline -ForegroundColor DarkGray
             }
 
-            if ($done.Count -lt $autoPrograms.Count) { Start-Sleep -Milliseconds 2000 }
+            if ($done.Count -lt $autoPrograms.Count) { Start-Sleep -Milliseconds 1000 }
         }
+
+        # Limpa a linha de status final
+        if ($statusLen -gt 0) { Write-Host "`r$(' ' * $statusLen)`r" -NoNewline }
 
         $total = [math]::Round(((Get-Date) - $globalStart).TotalSeconds)
         Write-Host ""
