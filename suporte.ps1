@@ -792,7 +792,505 @@ function Create-AdminAccount {
     }
 }
 
-# Depois, definimos a funcao do menu
+# Encripta senha no formato VNC (DES com bits invertidos por byte)
+function ConvertTo-VNCPassword ([string]$Password) {
+    $pw  = $Password.PadRight(8, "`0").Substring(0, 8)
+    $key = [byte[]]::new(8)
+    for ($i = 0; $i -lt 8; $i++) {
+        $b = [byte][char]$pw[$i]; $rb = 0
+        for ($j = 0; $j -lt 8; $j++) { $rb = ($rb -shl 1) -bor ($b -band 1); $b = $b -shr 1 }
+        $key[$i] = [byte]$rb
+    }
+    $des = [System.Security.Cryptography.DES]::Create()
+    $des.Key = $key
+    $des.IV  = [byte[]]::new(8)
+    $des.Mode    = [System.Security.Cryptography.CipherMode]::ECB
+    $des.Padding = [System.Security.Cryptography.PaddingMode]::None
+    $cipher = $des.CreateEncryptor().TransformFinalBlock([byte[]]::new(8), 0, 8)
+    return ($cipher | ForEach-Object { $_.ToString("x2") }) -join ""
+}
+
+# Funcao de padronizacao automatica
+function Start-AutoPadronizacao {
+    Clear-Host
+    Write-Host ""
+    Write-Host "  ==========================================================" -ForegroundColor Cyan
+    Write-Host "               PADRONIZACAO AUTOMATICA" -ForegroundColor Yellow
+    Write-Host "  ==========================================================" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "  Este processo ira configurar automaticamente:" -ForegroundColor White
+    Write-Host "   1. Fuso horario (Manaus - UTC-04:00)" -ForegroundColor DarkCyan
+    Write-Host "   2. Assistencia Remota" -ForegroundColor DarkCyan
+    Write-Host "   3. Area de Trabalho Remota (RDP)" -ForegroundColor DarkCyan
+    Write-Host "   4. Nome do computador" -ForegroundColor DarkCyan
+    Write-Host "   5. Ingresso no dominio" -ForegroundColor DarkCyan
+    Write-Host "   6. Conta de administrador local" -ForegroundColor DarkCyan
+    Write-Host "   7. Instalacao de programas padrao (winget)" -ForegroundColor DarkCyan
+    Write-Host ""
+    Write-Host "  Etapas que exigirem reinicializacao serao acumuladas" -ForegroundColor DarkGray
+    Write-Host "  e voce escolhera reiniciar ao final." -ForegroundColor DarkGray
+    Write-Host ""
+    Write-Host "  ==========================================================" -ForegroundColor Cyan
+    Write-Host ""
+
+    $needsRestart = $false
+
+    # Variaveis de rastreamento para o resumo visual final
+    $stFuso      = $null
+    $stAssist    = $null
+    $stRdp       = $null
+    $stNome      = $null; $stNomeVal = ""
+    $stDominio   = $null; $stDominioVal = ""
+    $stAdmin     = $null; $stAdminMsg = ""
+    $progsOk     = @()
+    $progsFail   = @()
+    $stWinget    = $null
+    $stVncConfig = $null; $stVncPortVal = ""
+
+    # ----------------------------------------------------------
+    # ETAPA 1: Fuso horario (Manaus - automatico, sem interacao)
+    # ----------------------------------------------------------
+    Write-Host "  [1/7] Configurando fuso horario para Manaus..." -ForegroundColor Cyan
+    try {
+        Set-TimeZone -Id "SA Western Standard Time" -ErrorAction Stop
+        $stFuso = "OK"
+        Write-Host "  [SUCESSO] Fuso horario definido: Manaus (UTC-04:00)" -ForegroundColor Green
+    } catch {
+        $stFuso = "ERRO"
+        Write-Host "  [ERRO] Nao foi possivel definir o fuso horario: $($_.Exception.Message)" -ForegroundColor Red
+    }
+    Write-Host ""
+
+    # ----------------------------------------------------------
+    # ETAPA 2: Assistencia Remota
+    # ----------------------------------------------------------
+    Write-Host "  [2/7] Habilitando Assistencia Remota..." -ForegroundColor Cyan
+    try {
+        Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server" -Name "fDenyTSConnections" -Value 0 -ErrorAction SilentlyContinue
+        Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server" -Name "fAllowToGetHelp" -Value 1 -ErrorAction SilentlyContinue
+        Remove-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" -Name "fAllowToGetHelp" -ErrorAction SilentlyContinue
+        Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" -Name "fAllowToGetHelp" -Value 1 -ErrorAction SilentlyContinue
+        Enable-NetFirewallRule -DisplayGroup "Remote Desktop" -ErrorAction SilentlyContinue
+        Enable-NetFirewallRule -DisplayGroup "Área de Trabalho Remota" -ErrorAction SilentlyContinue
+        Enable-NetFirewallRule -DisplayGroup "Remote Assistance" -ErrorAction SilentlyContinue
+        Enable-NetFirewallRule -DisplayGroup "Assistencia Remota" -ErrorAction SilentlyContinue
+        $svcList = @("TermService", "SessionEnv", "UmRdpService", "RemoteRegistry")
+        foreach ($svcName in $svcList) {
+            $svc = Get-Service -Name $svcName -ErrorAction SilentlyContinue
+            if ($svc) {
+                if ($svc.StartType -eq "Disabled") { Set-Service -Name $svcName -StartupType Automatic -ErrorAction SilentlyContinue }
+                if ($svc.Status -ne "Running")      { Start-Service -Name $svcName -ErrorAction SilentlyContinue }
+            }
+        }
+        $stAssist = "OK"
+        Write-Host "  [SUCESSO] Assistencia Remota habilitada." -ForegroundColor Green
+    } catch {
+        $stAssist = "ERRO"
+        Write-Host "  [ERRO] $($_.Exception.Message)" -ForegroundColor Red
+    }
+    Write-Host ""
+
+    # ----------------------------------------------------------
+    # ETAPA 3: Area de Trabalho Remota (RDP)
+    # ----------------------------------------------------------
+    Write-Host "  [3/7] Habilitando Area de Trabalho Remota (RDP)..." -ForegroundColor Cyan
+    try {
+        Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server" -Name "fDenyTSConnections" -Value 0 -ErrorAction Stop
+        $stRdp = "OK"
+        Write-Host "  [SUCESSO] Area de Trabalho Remota habilitada." -ForegroundColor Green
+    } catch {
+        $stRdp = "ERRO"
+        Write-Host "  [ERRO] $($_.Exception.Message)" -ForegroundColor Red
+    }
+    Write-Host ""
+
+    # ----------------------------------------------------------
+    # ETAPA 4: Nome do computador
+    # ----------------------------------------------------------
+    Write-Host "  [4/7] Alteracao do nome do computador" -ForegroundColor Cyan
+    Write-Host "  Nome atual: $env:COMPUTERNAME" -ForegroundColor White
+    $newName = Read-Host "  Novo nome (pressione Enter para pular)"
+    if ($newName.Trim() -ne "") {
+        try {
+            Rename-Computer -NewName $newName.Trim() -Force -ErrorAction Stop
+            $needsRestart = $true
+            $stNome    = "OK"
+            $stNomeVal = $newName.Trim()
+            Write-Host "  [SUCESSO] Nome alterado para '$($newName.Trim())'. Reinicializacao necessaria para aplicar." -ForegroundColor Green
+        } catch {
+            $stNome = "ERRO"
+            Write-Host "  [ERRO] $($_.Exception.Message)" -ForegroundColor Red
+        }
+    } else {
+        $stNome = "IGNORADO"
+        Write-Host "  [INFO] Etapa ignorada." -ForegroundColor DarkGray
+    }
+    Write-Host ""
+
+    # ----------------------------------------------------------
+    # ETAPA 5: Ingresso no dominio
+    # ----------------------------------------------------------
+    Write-Host "  [5/7] Ingresso no dominio" -ForegroundColor Cyan
+    $currentDomain = (Get-WmiObject -Class Win32_ComputerSystem -ErrorAction SilentlyContinue).Domain
+    Write-Host "  Dominio atual: $currentDomain" -ForegroundColor White
+    $domainName = Read-Host "  Nome do dominio (pressione Enter para pular)"
+    if ($domainName.Trim() -ne "") {
+        $domUser = Read-Host "  Usuario com permissao no dominio"
+        $domPass = Read-Host "  Senha" -AsSecureString
+        try {
+            $cred = New-Object System.Management.Automation.PSCredential($domUser, $domPass)
+            Add-Computer -DomainName $domainName.Trim() -Credential $cred -Force -ErrorAction Stop
+            $needsRestart   = $true
+            $stDominio      = "OK"
+            $stDominioVal   = $domainName.Trim()
+            Write-Host "  [SUCESSO] Computador adicionado ao dominio '$($domainName.Trim())'. Reinicializacao necessaria para aplicar." -ForegroundColor Green
+        } catch {
+            $stDominio = "ERRO"
+            Write-Host "  [ERRO] $($_.Exception.Message)" -ForegroundColor Red
+        }
+    } else {
+        $stDominio = "IGNORADO"
+        Write-Host "  [INFO] Etapa ignorada." -ForegroundColor DarkGray
+    }
+    Write-Host ""
+
+    # ----------------------------------------------------------
+    # ETAPA 6: Conta de administrador local
+    # ----------------------------------------------------------
+    Write-Host "  [6/7] Criando conta de administrador local..." -ForegroundColor Cyan
+    try {
+        if (-not (Get-LocalUser -Name "admin" -ErrorAction SilentlyContinue)) {
+            New-LocalUser -Name "admin" -NoPassword -Description "Conta de administrador criada via script" -ErrorAction Stop
+            Write-Host "  [SUCESSO] Conta 'admin' criada." -ForegroundColor Green
+            $stAdminMsg = "Conta criada"
+        } else {
+            Write-Host "  [INFO] Conta 'admin' ja existe." -ForegroundColor DarkGray
+            $stAdminMsg = "Conta ja existia"
+        }
+        $groupName = (Get-LocalGroup | Where-Object { $_.SID -match "S-1-5-32-544" }).Name
+        if (-not $groupName) { $groupName = "Administradores" }
+        $members = Get-LocalGroupMember -Group $groupName | Select-Object -ExpandProperty Name
+        if ($members -notcontains "$env:COMPUTERNAME\admin" -and $members -notcontains "admin") {
+            Add-LocalGroupMember -Group $groupName -Member "admin" -ErrorAction Stop
+            Write-Host "  [SUCESSO] Conta 'admin' adicionada ao grupo '$groupName'." -ForegroundColor Green
+            $stAdminMsg += " | adicionada ao grupo '$groupName'"
+        } else {
+            Write-Host "  [INFO] Conta 'admin' ja pertence ao grupo '$groupName'." -ForegroundColor DarkGray
+            $stAdminMsg += " | ja era membro do grupo '$groupName'"
+        }
+        $stAdmin = "OK"
+    } catch {
+        $stAdmin = "ERRO"
+        Write-Host "  [ERRO] $($_.Exception.Message)" -ForegroundColor Red
+    }
+    Write-Host ""
+
+    # ----------------------------------------------------------
+    # ETAPA 7: Instalacao de programas via winget (paralelo)
+    # ----------------------------------------------------------
+    Write-Host "  [7/7] Instalando programas padrao via winget..." -ForegroundColor Cyan
+
+    if (!(Get-Command winget -ErrorAction SilentlyContinue)) {
+        $stWinget = "ERRO"
+        Write-Host "  [ERRO] Winget nao encontrado. Instalacao ignorada." -ForegroundColor Red
+    } else {
+        $stWinget = "OK"
+        $autoPrograms = @(
+            @{ Id = "Microsoft.Java";               Name = "Java" },
+            @{ Id = "WinRAR.WinRAR";                Name = "WinRAR" },
+            @{ Id = "VideoLAN.VLC";                 Name = "VLC" },
+            @{ Id = "FoxitSoftware.FoxitReader";    Name = "Foxit Reader" },
+            @{ Id = "PDF24.PDF24";                  Name = "PDF24" },
+            @{ Id = "LibreOffice.LibreOffice";      Name = "LibreOffice" },
+            @{ Id = "Google.Chrome";                Name = "Google Chrome" },
+            @{ Id = "Mozilla.Firefox";              Name = "Mozilla Firefox" },
+            @{ Id = "Kaspersky.KasperskyAntiVirus"; Name = "Kaspersky" },
+            @{ Id = "UltraVNC.UltraVNC";            Name = "UltraVNC" }
+        )
+
+        Write-Host "  Disparando $($autoPrograms.Count) instalacoes em paralelo..." -ForegroundColor DarkGray
+        Write-Host ""
+
+        $jobMap      = @{}
+        $timeMap     = @{}
+        $globalStart = Get-Date
+
+        # Dispara todos os jobs ao mesmo tempo
+        foreach ($prog in $autoPrograms) {
+            $job = Start-Job -ScriptBlock {
+                param($pkgId)
+                $out = winget install --id $pkgId --silent --accept-source-agreements --accept-package-agreements 2>&1
+                [PSCustomObject]@{ ExitCode = $LASTEXITCODE; Output = ($out -join "`n") }
+            } -ArgumentList $prog.Id
+            $jobMap[$prog.Name]  = $job
+            $timeMap[$prog.Name] = Get-Date
+            Write-Host "  [>>] $($prog.Name.PadRight(18)) iniciando..." -ForegroundColor DarkCyan
+        }
+
+        Write-Host ""
+        $done        = @{}
+        $prevPending = $autoPrograms.Count
+
+        # Monitora e exibe cada conclusao conforme acontece
+        while ($done.Count -lt $autoPrograms.Count) {
+            foreach ($name in @($jobMap.Keys)) {
+                if ($done.ContainsKey($name)) { continue }
+                $job = $jobMap[$name]
+
+                if ($job.State -notin @("Running", "NotStarted")) {
+                    $elapsed = [math]::Round(((Get-Date) - $timeMap[$name]).TotalSeconds)
+                    $timeStr = if ($elapsed -ge 60) { "$([math]::Floor($elapsed/60))m$($elapsed%60)s" } else { "${elapsed}s" }
+
+                    $result   = Receive-Job $job -ErrorAction SilentlyContinue | Select-Object -Last 1
+                    $exitCode = if ($result -and $result.ExitCode -ne $null) { $result.ExitCode } else { -1 }
+                    $success  = ($job.State -eq "Completed") -and ($exitCode -eq 0 -or ($result.Output -match "already installed|No applicable update"))
+                    Remove-Job $job -Force -ErrorAction SilentlyContinue
+
+                    if ($success) {
+                        $progsOk += $name
+                        Write-Host "  [OK]   $($name.PadRight(18)) concluido em $timeStr" -ForegroundColor Green
+                    } else {
+                        $progsFail += $name
+                        Write-Host "  [ERRO] $($name.PadRight(18)) falhou   em $timeStr" -ForegroundColor Red
+                    }
+                    $done[$name] = $true
+                }
+            }
+
+            $pending = $autoPrograms.Count - $done.Count
+            if ($pending -gt 0 -and $pending -ne $prevPending) {
+                $elapsed = [math]::Round(((Get-Date) - $globalStart).TotalSeconds)
+                $timeStr = if ($elapsed -ge 60) { "$([math]::Floor($elapsed/60))m$($elapsed%60)s" } else { "${elapsed}s" }
+                Write-Host "  ... $pending app(s) ainda instalando | $timeStr decorridos" -ForegroundColor DarkGray
+                $prevPending = $pending
+            }
+
+            if ($done.Count -lt $autoPrograms.Count) { Start-Sleep -Milliseconds 2000 }
+        }
+
+        $total = [math]::Round(((Get-Date) - $globalStart).TotalSeconds)
+        Write-Host ""
+        Write-Host "  Instalacoes finalizadas em $([math]::Floor($total/60))m$($total%60)s | $($progsOk.Count) OK / $($progsFail.Count) falha(s)" -ForegroundColor DarkGray
+    }
+    Write-Host ""
+
+    # ----------------------------------------------------------
+    # CONFIGURACAO POS-INSTALACAO: UltraVNC (porta e senha)
+    # ----------------------------------------------------------
+    $vncIniPath = @(
+        "C:\Program Files\uvnc bvba\UltraVNC\ultravnc.ini",
+        "C:\Program Files (x86)\uvnc bvba\UltraVNC\ultravnc.ini"
+    ) | Where-Object { Test-Path $_ } | Select-Object -First 1
+
+    if ($vncIniPath) {
+        Write-Host "  Configurando UltraVNC..." -ForegroundColor Cyan
+
+        $vncPortInput = Read-Host "  Porta do UltraVNC (pressione Enter para usar 5900)"
+        $stVncPortVal = if ([string]::IsNullOrWhiteSpace($vncPortInput)) { "5900" } else { $vncPortInput.Trim() }
+
+        $vncPassSecure = Read-Host "  Senha do UltraVNC" -AsSecureString
+        $vncPassPlain  = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
+                             [Runtime.InteropServices.Marshal]::SecureStringToBSTR($vncPassSecure))
+
+        try {
+            $encPass      = ConvertTo-VNCPassword -Password $vncPassPlain
+            $vncPassPlain = $null  # limpa da memoria
+
+            $portSet = $false; $passSet = $false
+            $lines = Get-Content $vncIniPath | ForEach-Object {
+                if ($_ -match "^PortNumber=") { "PortNumber=$stVncPortVal"; $portSet = $true }
+                elseif ($_ -match "^passwd=")  { "passwd=$encPass";         $passSet = $true }
+                else { $_ }
+            }
+            if (-not $portSet -or -not $passSet) {
+                $newLines = @()
+                foreach ($line in $lines) {
+                    $newLines += $line
+                    if ($line -match "^\[ultravnc\]") {
+                        if (-not $portSet) { $newLines += "PortNumber=$stVncPortVal"; $portSet = $true }
+                        if (-not $passSet) { $newLines += "passwd=$encPass";          $passSet = $true }
+                    }
+                }
+                $lines = $newLines
+            }
+            $lines | Set-Content $vncIniPath
+
+            $svc = Get-Service -Name "uvnc_service" -ErrorAction SilentlyContinue
+            if ($svc) { Restart-Service -Name "uvnc_service" -Force -ErrorAction SilentlyContinue }
+
+            $stVncConfig = "OK"
+            Write-Host "  [SUCESSO] UltraVNC configurado na porta $stVncPortVal." -ForegroundColor Green
+        } catch {
+            $stVncConfig = "ERRO"
+            Write-Host "  [ERRO] Falha ao configurar UltraVNC: $($_.Exception.Message)" -ForegroundColor Red
+        }
+    } else {
+        $stVncConfig = "IGNORADO"
+        Write-Host "  [INFO] UltraVNC nao encontrado — configuracao ignorada." -ForegroundColor DarkGray
+    }
+    Write-Host ""
+
+    # ----------------------------------------------------------
+    # RESUMO VISUAL FINAL
+    # ----------------------------------------------------------
+    Write-Host "  ==========================================================" -ForegroundColor Cyan
+    Write-Host "                 RESUMO DA PADRONIZACAO" -ForegroundColor Yellow
+    Write-Host "  ==========================================================" -ForegroundColor Cyan
+    Write-Host ""
+
+    # Pre-calcula detalhes das etapas opcionais
+    $nomeDetalhe = switch ($stNome) {
+        "OK"       { "Alterado para: $stNomeVal  (requer reinicio)" }
+        "ERRO"     { "Falhou ao renomear" }
+        "IGNORADO" { "" }
+    }
+    $dominioDetalhe = switch ($stDominio) {
+        "OK"       { "Ingressou em: $stDominioVal  (requer reinicio)" }
+        "ERRO"     { "Falhou ao ingressar no dominio" }
+        "IGNORADO" { "" }
+    }
+
+    $linhas = @(
+        @{ Label = "Fuso horario";       Status = $stFuso;    Detalhe = "Manaus (UTC-04:00)" },
+        @{ Label = "Assistencia Remota"; Status = $stAssist;  Detalhe = "Habilitada (registro + firewall + servicos)" },
+        @{ Label = "RDP";                Status = $stRdp;     Detalhe = "Habilitado" },
+        @{ Label = "Nome do computador"; Status = $stNome;    Detalhe = $nomeDetalhe },
+        @{ Label = "Dominio";            Status = $stDominio; Detalhe = $dominioDetalhe },
+        @{ Label = "Conta admin";        Status = $stAdmin;   Detalhe = $stAdminMsg }
+    )
+
+    foreach ($linha in $linhas) {
+        $pad = $linha.Label.PadRight(22)
+        switch ($linha.Status) {
+            "OK" {
+                Write-Host "   " -NoNewline
+                Write-Host "[OK]   " -ForegroundColor Green -NoNewline
+                Write-Host "$pad" -NoNewline
+                if ($linha.Detalhe) { Write-Host "-> $($linha.Detalhe)" -ForegroundColor White } else { Write-Host "" }
+            }
+            "ERRO" {
+                Write-Host "   " -NoNewline
+                Write-Host "[ERRO] " -ForegroundColor Red -NoNewline
+                Write-Host "$pad" -NoNewline
+                if ($linha.Detalhe) { Write-Host "-> $($linha.Detalhe)" -ForegroundColor Red } else { Write-Host "-> Falhou" -ForegroundColor Red }
+            }
+            "IGNORADO" {
+                Write-Host "   " -NoNewline
+                Write-Host "[ -- ] " -ForegroundColor DarkGray -NoNewline
+                Write-Host "$pad" -NoNewline
+                Write-Host "-> Ignorado pelo usuario" -ForegroundColor DarkGray
+            }
+        }
+    }
+
+    # Linha de programas (logica separada por ser mais complexa)
+    $padProg = "Programas (winget)".PadRight(22)
+    if ($stWinget -eq "ERRO") {
+        Write-Host "   " -NoNewline
+        Write-Host "[ERRO] " -ForegroundColor Red -NoNewline
+        Write-Host "$padProg" -NoNewline
+        Write-Host "-> winget nao encontrado no sistema" -ForegroundColor Red
+    } elseif ($progsFail.Count -eq 0) {
+        Write-Host "   " -NoNewline
+        Write-Host "[OK]   " -ForegroundColor Green -NoNewline
+        Write-Host "$padProg" -NoNewline
+        Write-Host "-> $($progsOk.Count) de $($progsOk.Count) instalados com sucesso" -ForegroundColor White
+    } else {
+        $total = $progsOk.Count + $progsFail.Count
+        Write-Host "   " -NoNewline
+        Write-Host "[ERRO] " -ForegroundColor Red -NoNewline
+        Write-Host "$padProg" -NoNewline
+        Write-Host "-> $($progsOk.Count)/$total OK | Falhas: $($progsFail -join ', ')" -ForegroundColor Yellow
+    }
+
+    # Linha UltraVNC config
+    $padVnc = "UltraVNC config".PadRight(22)
+    switch ($stVncConfig) {
+        "OK" {
+            Write-Host "   " -NoNewline
+            Write-Host "[OK]   " -ForegroundColor Green -NoNewline
+            Write-Host "$padVnc" -NoNewline
+            Write-Host "-> Porta: $stVncPortVal | Senha configurada" -ForegroundColor White
+        }
+        "ERRO" {
+            Write-Host "   " -NoNewline
+            Write-Host "[ERRO] " -ForegroundColor Red -NoNewline
+            Write-Host "$padVnc" -NoNewline
+            Write-Host "-> Falhou ao gravar configuracao" -ForegroundColor Red
+        }
+        "IGNORADO" {
+            Write-Host "   " -NoNewline
+            Write-Host "[ -- ] " -ForegroundColor DarkGray -NoNewline
+            Write-Host "$padVnc" -NoNewline
+            Write-Host "-> UltraVNC nao instalado" -ForegroundColor DarkGray
+        }
+    }
+
+    Write-Host ""
+    Write-Host "  ==========================================================" -ForegroundColor Cyan
+    Write-Host ""
+
+    if ($needsRestart) {
+        Write-Host "  [AVISO] Algumas alteracoes exigem reinicializacao para entrar em vigor." -ForegroundColor Yellow
+        Write-Host ""
+        $restart = Read-Host "  Deseja reiniciar o computador agora? (S/N)"
+        if ($restart -eq 'S' -or $restart -eq 's') {
+            Write-Host "  Reiniciando em 5 segundos..." -ForegroundColor Cyan
+            Start-Sleep -Seconds 5
+            Restart-Computer -Force
+        } else {
+            Write-Host "  [INFO] Reinicie o computador manualmente para aplicar todas as alteracoes." -ForegroundColor Yellow
+        }
+    }
+}
+
+# Submenu de padronizacao manual
+function Show-ManualMenu {
+    do {
+        Clear-Host
+        Write-Host "==================================================="  -ForegroundColor Cyan
+        Write-Host "             PADRONIZACAO MANUAL                     " -ForegroundColor Yellow
+        Write-Host "==================================================="  -ForegroundColor Cyan
+        Write-Host ""
+        Write-Host " [1]  Definir fuso horario"
+        Write-Host " [2]  Instalar programas padrao"
+        Write-Host " [3]  Habilitar Assistencia Remota"
+        Write-Host " [4]  Testar configuracao da Assistencia Remota"
+        Write-Host " [5]  Habilitar Area de Trabalho Remota"
+        Write-Host " [6]  Alterar nome do computador"
+        Write-Host " [7]  Definir nome do dominio"
+        Write-Host " [8]  Criar conta admin"
+        Write-Host ""
+        Write-Host " [0]  Voltar ao menu principal" -ForegroundColor DarkGray
+        Write-Host ""
+        Write-Host "==================================================="  -ForegroundColor Cyan
+
+        $option = Read-Host "Escolha uma opcao"
+
+        try {
+            switch ($option) {
+                "1" { Set-TimeZoneOption; Pause }
+                "2" { Install-StandardPrograms; Pause }
+                "3" { Enable-RemoteAssistance; Pause }
+                "4" { Test-RemoteAssistance; Pause }
+                "5" { Enable-RemoteDesktop; Pause }
+                "6" { Set-ComputerName; Pause }
+                "7" { Set-DomainName; Pause }
+                "8" { Create-AdminAccount; Pause }
+                "0" { return }
+                default {
+                    Write-Host " [ERRO] Opcao invalida, tente novamente." -ForegroundColor Red
+                    Pause
+                }
+            }
+        } catch {
+            Write-Host " [ERRO] Ocorreu um erro ao executar a operacao: $($_.Exception.Message)" -ForegroundColor Red
+            Pause
+        }
+    } while ($option -ne "0")
+}
+
+# Menu principal
 function Show-Menu {
     do {
         Clear-Host
@@ -803,47 +1301,35 @@ function Show-Menu {
         Write-Host " [1]  Informacoes do PC" -ForegroundColor Green
         Write-Host " [2]  Obter chave do Windows"
         Write-Host " [3]  Ativar Windows/Office"
-        Write-Host " [4]  Definir fuso horario"
-        Write-Host " [5]  Instalar programas padrao"
-        Write-Host " [6]  Habilitar Assistencia Remota"
-        Write-Host " [7]  Testar configuracao da Assistencia Remota"
-        Write-Host " [8]  Habilitar Area de Trabalho Remota"
-        Write-Host " [9]  Alterar nome do computador"
-        Write-Host " [10] Definir nome do dominio"
-        Write-Host " [11] Criar conta admin"
-        Write-Host " [12] Sair" -ForegroundColor Red
+        Write-Host " [4]  Padronizacao Automatica" -ForegroundColor Magenta
+        Write-Host " [5]  Padronizacao Manual" -ForegroundColor Cyan
+        Write-Host " [6]  Sair" -ForegroundColor Red
         Write-Host ""
         Write-Host "==================================================="  -ForegroundColor Cyan
-        
+
         $option = Read-Host "Escolha uma opcao"
-        
+
         try {
             switch ($option) {
-                "1"  { Get-PCInfo; Pause }
-                "2"  { Get-WindowsKey; Pause }
-                "3"  { Activate-WindowsOffice; Pause }
-                "4"  { Set-TimeZoneOption; Pause }
-                "5"  { Install-StandardPrograms; Pause }
-                "6"  { Enable-RemoteAssistance; Pause }
-                "7"  { Test-RemoteAssistance; Pause }
-                "8"  { Enable-RemoteDesktop; Pause }
-                "9"  { Set-ComputerName; Pause }
-                "10" { Set-DomainName; Pause }
-                "11" { Create-AdminAccount; Pause }
-                "12" { 
+                "1" { Get-PCInfo; Pause }
+                "2" { Get-WindowsKey; Pause }
+                "3" { Activate-WindowsOffice; Pause }
+                "4" { Start-AutoPadronizacao; Pause }
+                "5" { Show-ManualMenu }
+                "6" {
                     Write-Host "Saindo do programa..." -ForegroundColor Yellow
-                    Exit 
+                    Exit
                 }
-                default { 
+                default {
                     Write-Host " [ERRO] Opcao invalida, tente novamente." -ForegroundColor Red
-                    Pause 
+                    Pause
                 }
             }
         } catch {
             Write-Host " [ERRO] Ocorreu um erro ao executar a operacao: $($_.Exception.Message)" -ForegroundColor Red
             Pause
         }
-    } while ($option -ne "12")
+    } while ($option -ne "6")
 }
 
 # Funcao para avisar o usuario como reiniciar o script como administrador
