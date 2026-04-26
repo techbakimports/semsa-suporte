@@ -315,14 +315,14 @@ function Install-StandardPrograms {
     
     $programs = @(
         @{
-            Id="Microsoft.Java"
+            Id="Oracle.JavaRuntimeEnvironment"
             Name="Java"
             ChocoId="jdk8"
             LocalPath="\\balbina\f$\INSTALL_SEMSA-2023\_Jav\jre-8u421-windows-x64.exe"
             LocalArgs="/s"
         },
         @{
-            Id="WinRAR.WinRAR"
+            Id="RARLab.WinRAR"
             Name="WinRAR"
             ChocoId="winrar"
             LocalPath="\\balbina\f$\INSTALL_SEMSA-2023\_Winrar\winrar-x64-611br.exe"
@@ -343,7 +343,7 @@ function Install-StandardPrograms {
             LocalArgs="/silent"
         },
         @{
-            Id="PDF24.PDF24"
+            Id="geeksoftwareGmbH.PDF24Creator"
             Name="PDF24"
             ChocoId="pdf24"
             LocalPath="\\balbina\f$\INSTALL_SEMSA-2023\_PDF24\pdf24-creator-11.18.0-x64 BAIXADO 19.08.2024.exe"
@@ -389,7 +389,7 @@ function Install-StandardPrograms {
             foreach ($program in $programs) {
                 Write-Output " [INFO] Instalando $($program.Name) via winget..."
                 try {
-                    winget install --id $program.Id --silent --accept-source-agreements --accept-package-agreements
+                    winget install --id $program.Id --exact --silent --accept-source-agreements --accept-package-agreements
                     Write-Output " [SUCESSO] $($program.Name) instalado com sucesso."
                 } catch {
                     Write-Output " [ERRO] Falha ao instalar $($program.Name): $($_.Exception.Message)"
@@ -999,99 +999,46 @@ function Start-AutoPadronizacao {
     } else {
         $stWinget = "OK"
         $autoPrograms = @(
-            @{ Id = "Microsoft.Java";               Name = "Java" },
-            @{ Id = "WinRAR.WinRAR";                Name = "WinRAR" },
-            @{ Id = "VideoLAN.VLC";                 Name = "VLC" },
-            @{ Id = "FoxitSoftware.FoxitReader";    Name = "Foxit Reader" },
-            @{ Id = "PDF24.PDF24";                  Name = "PDF24" },
-            @{ Id = "LibreOffice.LibreOffice";      Name = "LibreOffice" },
-            @{ Id = "Google.Chrome";                Name = "Google Chrome" },
-            @{ Id = "Mozilla.Firefox";              Name = "Mozilla Firefox" },
-            @{ Id = "Kaspersky.KasperskyAntiVirus"; Name = "Kaspersky" },
-            @{ Id = "UltraVNC.UltraVNC";            Name = "UltraVNC" }
+            @{ Id = "Oracle.JavaRuntimeEnvironment";  Name = "Java" },
+            @{ Id = "RARLab.WinRAR";                  Name = "WinRAR" },
+            @{ Id = "VideoLAN.VLC";                   Name = "VLC" },
+            @{ Id = "FoxitSoftware.FoxitReader";      Name = "Foxit Reader" },
+            @{ Id = "geeksoftwareGmbH.PDF24Creator";  Name = "PDF24" },
+            @{ Id = "LibreOffice.LibreOffice";         Name = "LibreOffice" },
+            @{ Id = "Google.Chrome";                   Name = "Google Chrome" },
+            @{ Id = "Mozilla.Firefox";                 Name = "Mozilla Firefox" },
+            @{ Id = "Kaspersky.KasperskyAntiVirus";   Name = "Kaspersky" },
+            @{ Id = "UltraVNC.UltraVNC";              Name = "UltraVNC" }
         )
 
         Write-Host "  Atualizando fontes do winget..." -ForegroundColor DarkGray
         winget source update | Out-Null
-        Write-Host "  Disparando $($autoPrograms.Count) instalacoes em paralelo (escalonado)..." -ForegroundColor DarkGray
+        Write-Host "  Instalando $($autoPrograms.Count) programas sequencialmente..." -ForegroundColor DarkGray
         Write-Host ""
 
-        $jobMap      = @{}
-        $timeMap     = @{}
         $globalStart = Get-Date
 
-        # Dispara os jobs com intervalo de 8s para evitar conflito no banco do winget
         foreach ($prog in $autoPrograms) {
-            $job = Start-Job -ScriptBlock {
-                param($pkgId)
-                $out = winget install --id $pkgId --silent --accept-source-agreements --accept-package-agreements 2>&1
-                [PSCustomObject]@{ ExitCode = $LASTEXITCODE; Output = ($out -join "`n") }
-            } -ArgumentList $prog.Id
-            $jobMap[$prog.Name]  = $job
-            $timeMap[$prog.Name] = Get-Date
-            Write-Host "  [>>] $($prog.Name.PadRight(18)) disparado" -ForegroundColor DarkCyan
+            $progStart = Get-Date
+            Write-Host "  [>>] $($prog.Name.PadRight(18)) instalando..." -NoNewline -ForegroundColor DarkCyan
 
-            # Conta regressiva entre disparos (exceto no ultimo)
-            if ($prog.Name -ne $autoPrograms[-1].Name) {
-                for ($s = 8; $s -ge 1; $s--) {
-                    Write-Host "`r  Proximo em ${s}s...   " -NoNewline -ForegroundColor DarkGray
-                    Start-Sleep -Seconds 1
-                }
-                Write-Host "`r$(' ' * 30)`r" -NoNewline
+            $out = winget install --id $prog.Id --exact --silent --accept-source-agreements --accept-package-agreements 2>&1
+            $exitCode = $LASTEXITCODE
+
+            $elapsed = [math]::Round(((Get-Date) - $progStart).TotalSeconds)
+            $timeStr = if ($elapsed -ge 60) { "$([math]::Floor($elapsed/60))m$($elapsed%60)s" } else { "${elapsed}s" }
+            $outText = $out -join "`n"
+            $success = ($exitCode -eq 0) -or ($outText -match "already installed|No applicable update|Nenhuma atualiza")
+
+            Write-Host "`r" -NoNewline
+            if ($success) {
+                $progsOk += $prog.Name
+                Write-Host "  [OK]   $($prog.Name.PadRight(18)) concluido em $timeStr" -ForegroundColor Green
+            } else {
+                $progsFail += $prog.Name
+                Write-Host "  [ERRO] $($prog.Name.PadRight(18)) falhou   em $timeStr" -ForegroundColor Red
             }
         }
-
-        Write-Host ""
-        $done      = @{}
-        $statusLen = 0
-
-        # Monitora e exibe cada conclusao conforme acontece, com status ao vivo
-        while ($done.Count -lt $autoPrograms.Count) {
-            foreach ($name in @($jobMap.Keys)) {
-                if ($done.ContainsKey($name)) { continue }
-                $job = $jobMap[$name]
-
-                if ($job.State -notin @("Running", "NotStarted")) {
-                    # Limpa a linha de status antes de imprimir o resultado
-                    if ($statusLen -gt 0) {
-                        Write-Host "`r$(' ' * $statusLen)`r" -NoNewline
-                        $statusLen = 0
-                    }
-
-                    $elapsed = [math]::Round(((Get-Date) - $timeMap[$name]).TotalSeconds)
-                    $timeStr = if ($elapsed -ge 60) { "$([math]::Floor($elapsed/60))m$($elapsed%60)s" } else { "${elapsed}s" }
-
-                    $result   = Receive-Job $job -ErrorAction SilentlyContinue | Select-Object -Last 1
-                    $exitCode = if ($result -and $result.ExitCode -ne $null) { $result.ExitCode } else { -1 }
-                    $success  = ($job.State -eq "Completed") -and ($exitCode -eq 0 -or ($result.Output -match "already installed|No applicable update|Nenhuma atualiza"))
-                    Remove-Job $job -Force -ErrorAction SilentlyContinue
-
-                    if ($success) {
-                        $progsOk += $name
-                        Write-Host "  [OK]   $($name.PadRight(18)) concluido em $timeStr" -ForegroundColor Green
-                    } else {
-                        $progsFail += $name
-                        Write-Host "  [ERRO] $($name.PadRight(18)) falhou   em $timeStr" -ForegroundColor Red
-                    }
-                    $done[$name] = $true
-                }
-            }
-
-            # Atualiza linha de status ao vivo (sobrescreve a mesma linha)
-            $pending = $autoPrograms.Count - $done.Count
-            if ($pending -gt 0) {
-                $elapsed = [math]::Round(((Get-Date) - $globalStart).TotalSeconds)
-                $timeStr = if ($elapsed -ge 60) { "$([math]::Floor($elapsed/60))m$($elapsed%60)s" } else { "${elapsed}s" }
-                $status  = "  ... $pending app(s) instalando | $timeStr decorridos"
-                $statusLen = $status.Length + 3
-                Write-Host "`r$status   " -NoNewline -ForegroundColor DarkGray
-            }
-
-            if ($done.Count -lt $autoPrograms.Count) { Start-Sleep -Milliseconds 1000 }
-        }
-
-        # Limpa a linha de status final
-        if ($statusLen -gt 0) { Write-Host "`r$(' ' * $statusLen)`r" -NoNewline }
 
         $total = [math]::Round(((Get-Date) - $globalStart).TotalSeconds)
         Write-Host ""
@@ -1151,7 +1098,7 @@ function Start-AutoPadronizacao {
         }
     } else {
         $stVncConfig = "IGNORADO"
-        Write-Host "  [INFO] UltraVNC nao encontrado — configuracao ignorada." -ForegroundColor DarkGray
+        Write-Host "  [INFO] UltraVNC nao encontrado - configuracao ignorada." -ForegroundColor DarkGray
     }
     Write-Host ""
 
