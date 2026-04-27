@@ -1,7 +1,3 @@
-#melhorias a serem feitas, esta dando sucesso mesmo sem instalar o aplicativo via winget
-#fuso horario precisa ser setado pelo nome da cidade, buscar pelo nome, atualmente esta pelo 'UTC'
-
-
 
 # Primeiro, definimos todas as funcoes
 
