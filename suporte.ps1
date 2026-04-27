@@ -994,16 +994,17 @@ function Start-AutoPadronizacao {
         Write-Host "  [ERRO] Winget nao encontrado. Instalacao ignorada." -ForegroundColor Red
     } else {
         $stWinget = "OK"
-        # Foxit Reader, Kaspersky e UltraVNC nao estao no repositorio publico do winget.
-        # Instale-os manualmente via servidor local (opcao no menu manual).
+        # Kaspersky nao esta no repositorio publico do winget - instalar via servidor local.
         $autoPrograms = @(
             @{ Id = "Oracle.JavaRuntimeEnvironment";       Name = "Java" },
             @{ Id = "RARLab.WinRAR";                       Name = "WinRAR" },
             @{ Id = "VideoLAN.VLC";                        Name = "VLC" },
+            @{ Id = "Foxit.FoxitReader";                   Name = "Foxit Reader" },
             @{ Id = "geeksoftwareGmbH.PDF24Creator";       Name = "PDF24" },
             @{ Id = "TheDocumentFoundation.LibreOffice";   Name = "LibreOffice" },
             @{ Id = "Google.Chrome";                       Name = "Google Chrome" },
-            @{ Id = "Mozilla.Firefox";                     Name = "Mozilla Firefox" }
+            @{ Id = "Mozilla.Firefox";                     Name = "Mozilla Firefox" },
+            @{ Id = "uvncbvba.UltraVNC";                   Name = "UltraVNC" }
         )
 
         Write-Host "  Atualizando fontes do winget..." -ForegroundColor DarkGray
