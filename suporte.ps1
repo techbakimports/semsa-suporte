@@ -350,7 +350,7 @@ function Install-StandardPrograms {
             LocalArgs="/quiet"
         },
         @{
-            Id="LibreOffice.LibreOffice"
+            Id="TheDocumentFoundation.LibreOffice"
             Name="LibreOffice"
             ChocoId="libreoffice"
             LocalPath="\\balbina\f$\INSTALL_SEMSA-2023\LibreOffice_24.8.4_Win_x86-64 BAIXADO 27.01.2025.exe"
@@ -998,50 +998,56 @@ function Start-AutoPadronizacao {
         Write-Host "  [ERRO] Winget nao encontrado. Instalacao ignorada." -ForegroundColor Red
     } else {
         $stWinget = "OK"
+        # Foxit Reader, Kaspersky e UltraVNC nao estao no repositorio publico do winget.
+        # Instale-os manualmente via servidor local (opcao no menu manual).
         $autoPrograms = @(
-            @{ Id = "Oracle.JavaRuntimeEnvironment";  Name = "Java" },
-            @{ Id = "RARLab.WinRAR";                  Name = "WinRAR" },
-            @{ Id = "VideoLAN.VLC";                   Name = "VLC" },
-            @{ Id = "FoxitSoftware.FoxitReader";      Name = "Foxit Reader" },
-            @{ Id = "geeksoftwareGmbH.PDF24Creator";  Name = "PDF24" },
-            @{ Id = "LibreOffice.LibreOffice";         Name = "LibreOffice" },
-            @{ Id = "Google.Chrome";                   Name = "Google Chrome" },
-            @{ Id = "Mozilla.Firefox";                 Name = "Mozilla Firefox" },
-            @{ Id = "Kaspersky.KasperskyAntiVirus";   Name = "Kaspersky" },
-            @{ Id = "UltraVNC.UltraVNC";              Name = "UltraVNC" }
+            @{ Id = "Oracle.JavaRuntimeEnvironment";       Name = "Java" },
+            @{ Id = "RARLab.WinRAR";                       Name = "WinRAR" },
+            @{ Id = "VideoLAN.VLC";                        Name = "VLC" },
+            @{ Id = "geeksoftwareGmbH.PDF24Creator";       Name = "PDF24" },
+            @{ Id = "TheDocumentFoundation.LibreOffice";   Name = "LibreOffice" },
+            @{ Id = "Google.Chrome";                       Name = "Google Chrome" },
+            @{ Id = "Mozilla.Firefox";                     Name = "Mozilla Firefox" }
         )
 
         Write-Host "  Atualizando fontes do winget..." -ForegroundColor DarkGray
         winget source update | Out-Null
-        Write-Host "  Instalando $($autoPrograms.Count) programas sequencialmente..." -ForegroundColor DarkGray
+        Write-Host "  Instalando $($autoPrograms.Count) programas..." -ForegroundColor DarkGray
         Write-Host ""
 
         $globalStart = Get-Date
+        $progIdx     = 0
 
         foreach ($prog in $autoPrograms) {
+            $progIdx++
             $progStart = Get-Date
-            Write-Host "  [>>] $($prog.Name.PadRight(18)) instalando..." -NoNewline -ForegroundColor DarkCyan
 
-            $out = winget install --id $prog.Id --exact --silent --accept-source-agreements --accept-package-agreements 2>&1
+            Write-Progress -Activity "Instalando programas via winget" `
+                           -Status "[$progIdx/$($autoPrograms.Count)] $($prog.Name)" `
+                           -PercentComplete (($progIdx - 1) / $autoPrograms.Count * 100)
+
+            Write-Host "  [$progIdx/$($autoPrograms.Count)] $($prog.Name)" -ForegroundColor Cyan
+
+            winget install --id $prog.Id --exact --accept-source-agreements --accept-package-agreements
             $exitCode = $LASTEXITCODE
 
             $elapsed = [math]::Round(((Get-Date) - $progStart).TotalSeconds)
             $timeStr = if ($elapsed -ge 60) { "$([math]::Floor($elapsed/60))m$($elapsed%60)s" } else { "${elapsed}s" }
-            $outText = $out -join "`n"
-            $success = ($exitCode -eq 0) -or ($outText -match "already installed|No applicable update|Nenhuma atualiza")
+            $success = ($exitCode -eq 0) -or ($exitCode -eq -1978335212)
 
-            Write-Host "`r" -NoNewline
             if ($success) {
                 $progsOk += $prog.Name
                 Write-Host "  [OK]   $($prog.Name.PadRight(18)) concluido em $timeStr" -ForegroundColor Green
             } else {
                 $progsFail += $prog.Name
-                Write-Host "  [ERRO] $($prog.Name.PadRight(18)) falhou   em $timeStr" -ForegroundColor Red
+                Write-Host "  [ERRO] $($prog.Name.PadRight(18)) falhou em $timeStr" -ForegroundColor Red
             }
+            Write-Host ""
         }
 
+        Write-Progress -Activity "Instalando programas via winget" -Completed
+
         $total = [math]::Round(((Get-Date) - $globalStart).TotalSeconds)
-        Write-Host ""
         Write-Host "  Instalacoes finalizadas em $([math]::Floor($total/60))m$($total%60)s | $($progsOk.Count) OK / $($progsFail.Count) falha(s)" -ForegroundColor DarkGray
     }
     Write-Host ""
