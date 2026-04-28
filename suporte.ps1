@@ -1007,9 +1007,7 @@ function Start-AutoPadronizacao {
             @{ Id = "uvncbvba.UltraVNC";                   Name = "UltraVNC" }
         )
 
-        Write-Host "  Atualizando fontes do winget..." -ForegroundColor DarkGray
-        winget source update | Out-Null
-        Write-Host "  Instalando $($autoPrograms.Count) programas..." -ForegroundColor DarkGray
+        Write-Host "  Instalando $($autoPrograms.Count) programas sequencialmente..." -ForegroundColor DarkGray
         Write-Host ""
 
         $globalStart = Get-Date
