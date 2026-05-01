@@ -768,11 +768,13 @@ function Create-AdminAccount {
 
     try {
         if (-not (Get-LocalUser -Name "admin" -ErrorAction SilentlyContinue)) {
-            New-LocalUser -Name "admin" -NoPassword -Description "Conta de administrador criada via script"
+            New-LocalUser -Name "admin" -NoPassword -Description "Conta de administrador criada via script" -PasswordNeverExpires $true
             Write-Host " [SUCESSO] Conta 'admin' criada com sucesso." -ForegroundColor Green
         } else {
             Write-Host " [INFO] A conta 'admin' ja existe no sistema." -ForegroundColor Yellow
         }
+
+        Set-LocalUser -Name "admin" -PasswordNeverExpires $true -ErrorAction SilentlyContinue
 
         # Adicionar ao grupo Administradores
         $groupName = (Get-LocalGroup | Where-Object { $_.SID -match "S-1-5-32-544" }).Name
@@ -959,13 +961,14 @@ function Start-AutoPadronizacao {
     Write-Host "  [6/7] Criando conta de administrador local..." -ForegroundColor Cyan
     try {
         if (-not (Get-LocalUser -Name "admin" -ErrorAction SilentlyContinue)) {
-            New-LocalUser -Name "admin" -NoPassword -Description "Conta de administrador criada via script" -ErrorAction Stop
+            New-LocalUser -Name "admin" -NoPassword -Description "Conta de administrador criada via script" -ErrorAction Stop -PasswordNeverExpires $true
             Write-Host "  [SUCESSO] Conta 'admin' criada." -ForegroundColor Green
             $stAdminMsg = "Conta criada"
         } else {
             Write-Host "  [INFO] Conta 'admin' ja existe." -ForegroundColor DarkGray
             $stAdminMsg = "Conta ja existia"
         }
+        Set-LocalUser -Name "admin" -PasswordNeverExpires $true -ErrorAction SilentlyContinue
         $groupName = (Get-LocalGroup | Where-Object { $_.SID -match "S-1-5-32-544" }).Name
         if (-not $groupName) { $groupName = "Administradores" }
         $members = Get-LocalGroupMember -Group $groupName | Select-Object -ExpandProperty Name
@@ -994,6 +997,11 @@ function Start-AutoPadronizacao {
         Write-Host "  [ERRO] Winget nao encontrado. Instalacao ignorada." -ForegroundColor Red
     } else {
         $stWinget = "OK"
+
+        Write-Host "  [INFO] Atualizando fontes do winget (aceite de termos exigido na primeira execucao)..." -ForegroundColor Cyan
+        winget source update
+        Write-Host ""
+
         # Kaspersky nao esta no repositorio publico do winget - instalar via servidor local.
         $autoPrograms = @(
             @{ Id = "Oracle.JavaRuntimeEnvironment";       Name = "Java" },
@@ -1023,7 +1031,7 @@ function Start-AutoPadronizacao {
 
             Write-Host "  [$progIdx/$($autoPrograms.Count)] $($prog.Name)" -ForegroundColor Cyan
 
-            winget install --id $prog.Id --exact --accept-source-agreements --accept-package-agreements
+            winget install --id $prog.Id --exact --silent --accept-source-agreements --accept-package-agreements
             $exitCode = $LASTEXITCODE
 
             $elapsed = [math]::Round(((Get-Date) - $progStart).TotalSeconds)
@@ -1050,10 +1058,34 @@ function Start-AutoPadronizacao {
     # ----------------------------------------------------------
     # CONFIGURACAO POS-INSTALACAO: UltraVNC (porta e senha)
     # ----------------------------------------------------------
-    $vncIniPath = @(
+
+    # Iniciar servico para garantir criacao do ini, aguardar ate 20s
+    $svcVnc = Get-Service -Name "uvnc_service" -ErrorAction SilentlyContinue
+    if ($svcVnc -and $svcVnc.Status -ne "Running") {
+        Start-Service "uvnc_service" -ErrorAction SilentlyContinue
+        Start-Sleep -Seconds 3
+    }
+
+    $vncPossiblePaths = @(
         "C:\Program Files\uvnc bvba\UltraVNC\ultravnc.ini",
         "C:\Program Files (x86)\uvnc bvba\UltraVNC\ultravnc.ini"
-    ) | Where-Object { Test-Path $_ } | Select-Object -First 1
+    )
+    $vncIniPath = $null
+    $vncDeadline = (Get-Date).AddSeconds(20)
+    do {
+        $vncIniPath = $vncPossiblePaths | Where-Object { Test-Path $_ } | Select-Object -First 1
+        if (-not $vncIniPath) { Start-Sleep -Seconds 2 }
+    } while (-not $vncIniPath -and (Get-Date) -lt $vncDeadline)
+
+    # Se o diretorio existe mas o ini ainda nao foi criado, criar um minimo
+    if (-not $vncIniPath) {
+        $vncDir = @("C:\Program Files\uvnc bvba\UltraVNC", "C:\Program Files (x86)\uvnc bvba\UltraVNC") |
+                  Where-Object { Test-Path $_ } | Select-Object -First 1
+        if ($vncDir) {
+            $vncIniPath = "$vncDir\ultravnc.ini"
+            "[ultravnc]`r`nPortNumber=5900`r`npasswd=" | Set-Content $vncIniPath -Encoding Default
+        }
+    }
 
     if ($vncIniPath) {
         Write-Host "  Configurando UltraVNC..." -ForegroundColor Cyan
