@@ -1437,7 +1437,8 @@ function Show-PadronizacaoGUI {
         [System.Windows.Forms.Application]::DoEvents()
     }
 
-    $script:guiConcluido = $false
+    $script:guiConcluido   = $false
+    $script:guiNeedsRestart = $false
 
     $btnIniciar.Add_Click({
         if ($script:guiConcluido) { $form.Close(); return }
@@ -1493,7 +1494,8 @@ function Show-PadronizacaoGUI {
             & $log "  [4] Renomeando para '$($txtNome.Text.Trim())'..." $corInfo
             try {
                 Rename-Computer -NewName $txtNome.Text.Trim() -Force -ErrorAction Stop
-                & $log "      [OK] Renomeado. Reinicialize para aplicar." $corOk
+                $script:guiNeedsRestart = $true
+                & $log "      [OK] Renomeado. Reinicializacao necessaria." $corOk
             } catch { & $log "      [ERRO] $($_.Exception.Message)" $corErro }
         }
 
@@ -1505,7 +1507,8 @@ function Show-PadronizacaoGUI {
                 $sp   = ConvertTo-SecureString $txtDomPass.Text -AsPlainText -Force
                 $cred = New-Object System.Management.Automation.PSCredential($txtDomUser.Text, $sp)
                 Add-Computer -DomainName $domVal -Credential $cred -Force -ErrorAction Stop
-                & $log "      [OK] Ingressou no dominio. Reinicialize para aplicar." $corOk
+                $script:guiNeedsRestart = $true
+                & $log "      [OK] Ingressou no dominio. Reinicializacao necessaria." $corOk
             } catch { & $log "      [ERRO] $($_.Exception.Message)" $corErro }
         }
 
@@ -1599,6 +1602,18 @@ function Show-PadronizacaoGUI {
         $btnIniciar.Text = "CONCLUIDO — Clique para fechar"
         $btnIniciar.BackColor = [System.Drawing.Color]::FromArgb(0, 110, 0)
         $btnIniciar.Enabled = $true
+
+        if ($script:guiNeedsRestart) {
+            $resposta = [System.Windows.Forms.MessageBox]::Show(
+                "Algumas alteracoes exigem reinicializacao para entrar em vigor.`n`nDeseja reiniciar agora?",
+                "Reiniciar o computador?",
+                [System.Windows.Forms.MessageBoxButtons]::YesNo,
+                [System.Windows.Forms.MessageBoxIcon]::Warning
+            )
+            if ($resposta -eq [System.Windows.Forms.DialogResult]::Yes) {
+                Restart-Computer -Force
+            }
+        }
     })
 
     [void]$form.ShowDialog()
