@@ -1226,6 +1226,384 @@ function Start-AutoPadronizacao {
     }
 }
 
+# GUI de padronizacao
+function Show-PadronizacaoGUI {
+    Add-Type -AssemblyName System.Windows.Forms
+    Add-Type -AssemblyName System.Drawing
+
+    $corFundo    = [System.Drawing.Color]::FromArgb(28, 28, 28)
+    $corPainel   = [System.Drawing.Color]::FromArgb(45, 45, 45)
+    $corTexto    = [System.Drawing.Color]::White
+    $corDestaque = [System.Drawing.Color]::FromArgb(0, 170, 230)
+    $corAmarelo  = [System.Drawing.Color]::FromArgb(255, 210, 0)
+    $corBotao    = [System.Drawing.Color]::FromArgb(0, 110, 170)
+    $corOk       = [System.Drawing.Color]::LimeGreen
+    $corErro     = [System.Drawing.Color]::OrangeRed
+    $corInfo     = [System.Drawing.Color]::DeepSkyBlue
+    $corAviso    = [System.Drawing.Color]::FromArgb(255, 210, 0)
+
+    $form = New-Object System.Windows.Forms.Form
+    $form.Text = "SEMSA Suporte — GUI Padronizacao"
+    $form.Size = New-Object System.Drawing.Size(830, 720)
+    $form.StartPosition = "CenterScreen"
+    $form.BackColor = $corFundo
+    $form.ForeColor = $corTexto
+    $form.FormBorderStyle = "FixedDialog"
+    $form.MaximizeBox = $false
+
+    $lblTitulo = New-Object System.Windows.Forms.Label
+    $lblTitulo.Text = "SEMSA SUPORTE — PADRONIZACAO GUI"
+    $lblTitulo.Font = New-Object System.Drawing.Font("Consolas", 13, [System.Drawing.FontStyle]::Bold)
+    $lblTitulo.ForeColor = $corDestaque
+    $lblTitulo.AutoSize = $true
+    $lblTitulo.Location = New-Object System.Drawing.Point(15, 12)
+    $form.Controls.Add($lblTitulo)
+
+    # --- PAINEL ESQUERDO: Etapas ---
+    $panelEtapas = New-Object System.Windows.Forms.Panel
+    $panelEtapas.Location = New-Object System.Drawing.Point(10, 48)
+    $panelEtapas.Size = New-Object System.Drawing.Size(355, 310)
+    $panelEtapas.BackColor = $corPainel
+    $form.Controls.Add($panelEtapas)
+
+    $lblEtapas = New-Object System.Windows.Forms.Label
+    $lblEtapas.Text = "  ETAPAS DE CONFIGURACAO"
+    $lblEtapas.Font = New-Object System.Drawing.Font("Consolas", 9, [System.Drawing.FontStyle]::Bold)
+    $lblEtapas.ForeColor = $corAmarelo
+    $lblEtapas.Size = New-Object System.Drawing.Size(355, 22)
+    $lblEtapas.Location = New-Object System.Drawing.Point(0, 5)
+    $panelEtapas.Controls.Add($lblEtapas)
+
+    $cbEtapas = @{}
+    $etapas = @(
+        @{ Key = "fuso";   Label = "Fuso horario (Manaus UTC-04:00)"; Def = $true  },
+        @{ Key = "assist"; Label = "Assistencia Remota";              Def = $true  },
+        @{ Key = "rdp";    Label = "Area de Trabalho Remota (RDP)";  Def = $true  },
+        @{ Key = "admin";  Label = "Criar conta admin local";         Def = $true  },
+        @{ Key = "progs";  Label = "Instalar programas";             Def = $true  }
+    )
+    $yE = 32
+    foreach ($e in $etapas) {
+        $cb = New-Object System.Windows.Forms.CheckBox
+        $cb.Text = $e.Label; $cb.Checked = $e.Def
+        $cb.Font = New-Object System.Drawing.Font("Consolas", 8)
+        $cb.ForeColor = $corTexto; $cb.BackColor = $corPainel
+        $cb.Size = New-Object System.Drawing.Size(335, 20)
+        $cb.Location = New-Object System.Drawing.Point(10, $yE)
+        $panelEtapas.Controls.Add($cb)
+        $cbEtapas[$e.Key] = $cb
+        $yE += 26
+    }
+
+    $lblSep = New-Object System.Windows.Forms.Label
+    $lblSep.Text = "  ─── Opcional ─────────────────────────"
+    $lblSep.Font = New-Object System.Drawing.Font("Consolas", 7)
+    $lblSep.ForeColor = [System.Drawing.Color]::Gray
+    $lblSep.Size = New-Object System.Drawing.Size(345, 16)
+    $lblSep.Location = New-Object System.Drawing.Point(0, $yE)
+    $panelEtapas.Controls.Add($lblSep)
+    $yE += 20
+
+    $lblNome = New-Object System.Windows.Forms.Label
+    $lblNome.Text = "  Novo nome do computador:"
+    $lblNome.Font = New-Object System.Drawing.Font("Consolas", 8)
+    $lblNome.ForeColor = $corTexto
+    $lblNome.Size = New-Object System.Drawing.Size(345, 16)
+    $lblNome.Location = New-Object System.Drawing.Point(0, $yE)
+    $panelEtapas.Controls.Add($lblNome)
+    $yE += 18
+
+    $txtNome = New-Object System.Windows.Forms.TextBox
+    $txtNome.Font = New-Object System.Drawing.Font("Consolas", 8)
+    $txtNome.BackColor = [System.Drawing.Color]::FromArgb(60, 60, 60)
+    $txtNome.ForeColor = $corTexto
+    $txtNome.Size = New-Object System.Drawing.Size(330, 20)
+    $txtNome.Location = New-Object System.Drawing.Point(10, $yE)
+    $panelEtapas.Controls.Add($txtNome)
+    $yE += 28
+
+    $lblDom = New-Object System.Windows.Forms.Label
+    $lblDom.Text = "  Dominio / Usuario / Senha:"
+    $lblDom.Font = New-Object System.Drawing.Font("Consolas", 8)
+    $lblDom.ForeColor = $corTexto
+    $lblDom.Size = New-Object System.Drawing.Size(345, 16)
+    $lblDom.Location = New-Object System.Drawing.Point(0, $yE)
+    $panelEtapas.Controls.Add($lblDom)
+    $yE += 18
+
+    $txtDominio = New-Object System.Windows.Forms.TextBox
+    $txtDominio.Font = New-Object System.Drawing.Font("Consolas", 8)
+    $txtDominio.BackColor = [System.Drawing.Color]::FromArgb(60, 60, 60)
+    $txtDominio.ForeColor = $corTexto; $txtDominio.Size = New-Object System.Drawing.Size(140, 20)
+    $txtDominio.Location = New-Object System.Drawing.Point(10, $yE)
+    $panelEtapas.Controls.Add($txtDominio)
+
+    $txtDomUser = New-Object System.Windows.Forms.TextBox
+    $txtDomUser.Font = New-Object System.Drawing.Font("Consolas", 8)
+    $txtDomUser.BackColor = [System.Drawing.Color]::FromArgb(60, 60, 60)
+    $txtDomUser.ForeColor = [System.Drawing.Color]::Gray
+    $txtDomUser.Text = "usuario"; $txtDomUser.Size = New-Object System.Drawing.Size(85, 20)
+    $txtDomUser.Location = New-Object System.Drawing.Point(156, $yE)
+    $panelEtapas.Controls.Add($txtDomUser)
+
+    $txtDomPass = New-Object System.Windows.Forms.TextBox
+    $txtDomPass.Font = New-Object System.Drawing.Font("Consolas", 8)
+    $txtDomPass.BackColor = [System.Drawing.Color]::FromArgb(60, 60, 60)
+    $txtDomPass.ForeColor = [System.Drawing.Color]::Gray
+    $txtDomPass.Text = "senha"; $txtDomPass.UseSystemPasswordChar = $false
+    $txtDomPass.Size = New-Object System.Drawing.Size(85, 20)
+    $txtDomPass.Location = New-Object System.Drawing.Point(247, $yE)
+    $panelEtapas.Controls.Add($txtDomPass)
+
+    # --- PAINEL DIREITO: Programas ---
+    $panelProgs = New-Object System.Windows.Forms.Panel
+    $panelProgs.Location = New-Object System.Drawing.Point(375, 48)
+    $panelProgs.Size = New-Object System.Drawing.Size(430, 310)
+    $panelProgs.BackColor = $corPainel
+    $form.Controls.Add($panelProgs)
+
+    $lblProgs = New-Object System.Windows.Forms.Label
+    $lblProgs.Text = "  PROGRAMAS A INSTALAR"
+    $lblProgs.Font = New-Object System.Drawing.Font("Consolas", 9, [System.Drawing.FontStyle]::Bold)
+    $lblProgs.ForeColor = $corAmarelo
+    $lblProgs.Size = New-Object System.Drawing.Size(430, 22)
+    $lblProgs.Location = New-Object System.Drawing.Point(0, 5)
+    $panelProgs.Controls.Add($lblProgs)
+
+    $listPrograms = @(
+        @{ ChocoId = "Temurin8jre";       Name = "Java (JRE)";     Extra = "" },
+        @{ ChocoId = "winrar";            Name = "WinRAR";          Extra = "" },
+        @{ ChocoId = "vlc";               Name = "VLC";             Extra = "" },
+        @{ ChocoId = "FoxitReader";       Name = "Foxit Reader";    Extra = "" },
+        @{ ChocoId = "pdf24";             Name = "PDF24";           Extra = "" },
+        @{ ChocoId = "libreoffice-still"; Name = "LibreOffice";     Extra = "" },
+        @{ ChocoId = "GoogleChrome";      Name = "Google Chrome";   Extra = "--ignore-checksums" },
+        @{ ChocoId = "Firefox";           Name = "Firefox";         Extra = "" },
+        @{ ChocoId = "ultravnc";          Name = "UltraVNC (GUI)";  Extra = "" }
+    )
+
+    $cbProgs = @{}
+    $yP = 32; $col = 10
+    foreach ($p in $listPrograms) {
+        $cb = New-Object System.Windows.Forms.CheckBox
+        $cb.Text = $p.Name; $cb.Checked = $true
+        $cb.Font = New-Object System.Drawing.Font("Consolas", 8)
+        $cb.ForeColor = $corTexto; $cb.BackColor = $corPainel
+        $cb.Size = New-Object System.Drawing.Size(205, 20)
+        $cb.Location = New-Object System.Drawing.Point($col, $yP)
+        $panelProgs.Controls.Add($cb)
+        $cbProgs[$p.ChocoId] = $cb
+        if ($col -eq 10) { $col = 218 } else { $col = 10; $yP += 26 }
+    }
+
+    # Botao iniciar
+    $btnIniciar = New-Object System.Windows.Forms.Button
+    $btnIniciar.Text = "INICIAR PADRONIZACAO"
+    $btnIniciar.Font = New-Object System.Drawing.Font("Consolas", 11, [System.Drawing.FontStyle]::Bold)
+    $btnIniciar.BackColor = $corBotao
+    $btnIniciar.ForeColor = $corTexto
+    $btnIniciar.FlatStyle = "Flat"
+    $btnIniciar.FlatAppearance.BorderSize = 0
+    $btnIniciar.Size = New-Object System.Drawing.Size(795, 40)
+    $btnIniciar.Location = New-Object System.Drawing.Point(10, 368)
+    $form.Controls.Add($btnIniciar)
+
+    $lblLog = New-Object System.Windows.Forms.Label
+    $lblLog.Text = "  LOG DE EXECUCAO"
+    $lblLog.Font = New-Object System.Drawing.Font("Consolas", 8, [System.Drawing.FontStyle]::Bold)
+    $lblLog.ForeColor = $corAmarelo
+    $lblLog.Size = New-Object System.Drawing.Size(200, 16)
+    $lblLog.Location = New-Object System.Drawing.Point(10, 416)
+    $form.Controls.Add($lblLog)
+
+    $rtbLog = New-Object System.Windows.Forms.RichTextBox
+    $rtbLog.BackColor = [System.Drawing.Color]::FromArgb(15, 15, 15)
+    $rtbLog.ForeColor = $corTexto
+    $rtbLog.Font = New-Object System.Drawing.Font("Consolas", 8)
+    $rtbLog.ReadOnly = $true
+    $rtbLog.Size = New-Object System.Drawing.Size(795, 225)
+    $rtbLog.Location = New-Object System.Drawing.Point(10, 434)
+    $rtbLog.ScrollBars = "Vertical"
+    $form.Controls.Add($rtbLog)
+
+    # Helper de log
+    $log = {
+        param([string]$msg, [System.Drawing.Color]$c)
+        $rtbLog.SelectionStart = $rtbLog.TextLength
+        $rtbLog.SelectionLength = 0
+        $rtbLog.SelectionColor = $c
+        $rtbLog.AppendText("$msg`n")
+        $rtbLog.ScrollToCaret()
+        [System.Windows.Forms.Application]::DoEvents()
+    }
+
+    $script:guiConcluido = $false
+
+    $btnIniciar.Add_Click({
+        if ($script:guiConcluido) { $form.Close(); return }
+
+        $btnIniciar.Enabled = $false
+        $btnIniciar.Text = "EXECUTANDO..."
+        $rtbLog.Clear()
+
+        # Etapa 1 - Fuso
+        if ($cbEtapas["fuso"].Checked) {
+            & $log "  [1] Configurando fuso horario Manaus..." $corInfo
+            try {
+                Set-TimeZone -Id "SA Western Standard Time" -ErrorAction Stop
+                & $log "      [OK] Fuso configurado." $corOk
+            } catch { & $log "      [ERRO] $($_.Exception.Message)" $corErro }
+        }
+
+        # Etapa 2 - Assistencia Remota
+        if ($cbEtapas["assist"].Checked) {
+            & $log "  [2] Habilitando Assistencia Remota..." $corInfo
+            try {
+                Set-ItemProperty "HKLM:\System\CurrentControlSet\Control\Terminal Server" "fDenyTSConnections" 0 -EA SilentlyContinue
+                Set-ItemProperty "HKLM:\System\CurrentControlSet\Control\Terminal Server" "fAllowToGetHelp" 1 -EA SilentlyContinue
+                Remove-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" "fAllowToGetHelp" -EA SilentlyContinue
+                Set-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" "fAllowToGetHelp" 1 -EA SilentlyContinue
+                Set-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\Remote Assistance" "fAllowToGetHelp" 1 -EA SilentlyContinue
+                Enable-NetFirewallRule -DisplayGroup "Remote Desktop" -EA SilentlyContinue
+                Enable-NetFirewallRule -DisplayGroup "Área de Trabalho Remota" -EA SilentlyContinue
+                Enable-NetFirewallRule -DisplayGroup "Remote Assistance" -EA SilentlyContinue
+                Enable-NetFirewallRule -DisplayGroup "Assistencia Remota" -EA SilentlyContinue
+                foreach ($sn in @("TermService","SessionEnv","UmRdpService","RemoteRegistry")) {
+                    $s = Get-Service -Name $sn -EA SilentlyContinue
+                    if ($s) {
+                        if ($s.StartType -eq "Disabled") { Set-Service $sn -StartupType Automatic -EA SilentlyContinue }
+                        if ($s.Status -ne "Running")     { Start-Service $sn -EA SilentlyContinue }
+                    }
+                }
+                & $log "      [OK] Assistencia Remota habilitada." $corOk
+            } catch { & $log "      [ERRO] $($_.Exception.Message)" $corErro }
+        }
+
+        # Etapa 3 - RDP
+        if ($cbEtapas["rdp"].Checked) {
+            & $log "  [3] Habilitando RDP..." $corInfo
+            try {
+                Set-ItemProperty "HKLM:\System\CurrentControlSet\Control\Terminal Server" "fDenyTSConnections" 0 -ErrorAction Stop
+                & $log "      [OK] RDP habilitado." $corOk
+            } catch { & $log "      [ERRO] $($_.Exception.Message)" $corErro }
+        }
+
+        # Etapa 4 - Nome do computador
+        if ($txtNome.Text.Trim() -ne "") {
+            & $log "  [4] Renomeando para '$($txtNome.Text.Trim())'..." $corInfo
+            try {
+                Rename-Computer -NewName $txtNome.Text.Trim() -Force -ErrorAction Stop
+                & $log "      [OK] Renomeado. Reinicialize para aplicar." $corOk
+            } catch { & $log "      [ERRO] $($_.Exception.Message)" $corErro }
+        }
+
+        # Etapa 5 - Dominio
+        $domVal = $txtDominio.Text.Trim()
+        if ($domVal -ne "") {
+            & $log "  [5] Ingressando no dominio '$domVal'..." $corInfo
+            try {
+                $sp   = ConvertTo-SecureString $txtDomPass.Text -AsPlainText -Force
+                $cred = New-Object System.Management.Automation.PSCredential($txtDomUser.Text, $sp)
+                Add-Computer -DomainName $domVal -Credential $cred -Force -ErrorAction Stop
+                & $log "      [OK] Ingressou no dominio. Reinicialize para aplicar." $corOk
+            } catch { & $log "      [ERRO] $($_.Exception.Message)" $corErro }
+        }
+
+        # Etapa 6 - Conta admin
+        if ($cbEtapas["admin"].Checked) {
+            & $log "  [6] Criando conta admin..." $corInfo
+            try {
+                if (-not (Get-LocalUser -Name "admin" -EA SilentlyContinue)) {
+                    try {
+                        New-LocalUser -Name "admin" -NoPassword -Description "Conta criada via GUI" -PasswordNeverExpires $true -EA Stop
+                    } catch {
+                        $r = net user admin "" /add /y 2>&1
+                        if ($LASTEXITCODE -ne 0) { throw "net user falhou: $r" }
+                    }
+                }
+                Set-LocalUser -Name "admin" -PasswordNeverExpires $true -EA SilentlyContinue
+                $grp = (Get-LocalGroup | Where-Object { $_.SID -match "S-1-5-32-544" }).Name
+                if (-not $grp) { $grp = "Administradores" }
+                $mem = Get-LocalGroupMember -Group $grp | Select-Object -ExpandProperty Name
+                if ($mem -notcontains "$env:COMPUTERNAME\admin" -and $mem -notcontains "admin") {
+                    Add-LocalGroupMember -Group $grp -Member "admin" -EA Stop
+                }
+                & $log "      [OK] Conta admin configurada no grupo '$grp'." $corOk
+            } catch { & $log "      [ERRO] $($_.Exception.Message)" $corErro }
+        }
+
+        # Etapa 7 - Programas
+        if ($cbEtapas["progs"].Checked) {
+            & $log "" $corInfo
+            & $log "  [7] Instalando programas via Chocolatey..." $corInfo
+
+            $chocoOk = $false
+            if (Get-Command choco -EA SilentlyContinue) {
+                $chocoOk = $true
+                & $log "      Chocolatey ja instalado." $corOk
+            } else {
+                & $log "      Chocolatey nao encontrado. Instalando..." $corAviso
+                try {
+                    Set-ExecutionPolicy Bypass -Scope Process -Force
+                    [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
+                    Invoke-Expression ((New-Object System.Net.WebClient).DownloadString('https://chocolatey.org/install.ps1'))
+                    $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" +
+                                [System.Environment]::GetEnvironmentVariable("Path","User")
+                    if (Get-Command choco -EA SilentlyContinue) {
+                        $chocoOk = $true
+                        & $log "      [OK] Chocolatey instalado." $corOk
+                    } else { throw "choco nao reconhecido apos instalacao." }
+                } catch {
+                    & $log "      [ERRO] Falha no Chocolatey: $($_.Exception.Message)" $corErro
+                    & $log "      Instale manualmente e tente novamente." $corErro
+                }
+            }
+
+            if ($chocoOk) {
+                $selecionados = $listPrograms | Where-Object { $cbProgs[$_.ChocoId].Checked -and $_.ChocoId -ne "ultravnc" }
+                foreach ($p in $selecionados) {
+                    & $log "      Instalando $($p.Name)..." $corInfo
+                    $a = @($p.ChocoId, '-y', '--no-progress')
+                    if ($p.Extra) { $a += $p.Extra.Split(' ') }
+                    & choco install @a | Out-Null
+                    if ($LASTEXITCODE -eq 0) {
+                        & $log "      [OK] $($p.Name)" $corOk
+                    } else {
+                        & $log "      [ERRO] $($p.Name) (cod: $LASTEXITCODE)" $corErro
+                    }
+                    [System.Windows.Forms.Application]::DoEvents()
+                }
+
+                if ($cbProgs["ultravnc"].Checked) {
+                    & $log "" $corInfo
+                    & $log "      Abrindo instalador do UltraVNC (interativo)..." $corAviso
+                    & $log "      Configure e finalize o instalador para continuar." $corAviso
+                    choco install ultravnc --override-arguments --install-arguments="/SP- /NORESTART" -y | Out-Null
+                    if ($LASTEXITCODE -eq 0) {
+                        & $log "      [OK] UltraVNC instalado." $corOk
+                    } else {
+                        & $log "      [ERRO] UltraVNC falhou (cod: $LASTEXITCODE)." $corErro
+                    }
+                }
+            }
+        }
+
+        & $log "" $corInfo
+        & $log "  ================================================" $corAviso
+        & $log "  ATENCAO — ETAPAS MANUAIS RESTANTES:" $corAviso
+        & $log "  [1] Certificado Fortinet: certmgr.msc" $corAviso
+        & $log "  [2] Kaspersky: \\balbina\suporte\Kasper ok\" $corAviso
+        & $log "  ================================================" $corAviso
+
+        $script:guiConcluido = $true
+        $btnIniciar.Text = "CONCLUIDO — Clique para fechar"
+        $btnIniciar.BackColor = [System.Drawing.Color]::FromArgb(0, 110, 0)
+        $btnIniciar.Enabled = $true
+    })
+
+    [void]$form.ShowDialog()
+}
+
 # Submenu de padronizacao manual
 function Show-ManualMenu {
     do {
@@ -1283,9 +1661,10 @@ function Show-Menu {
         Write-Host " [1]  Informacoes do PC" -ForegroundColor Green
         Write-Host " [2]  Obter chave do Windows"
         Write-Host " [3]  Ativar Windows/Office"
-        Write-Host " [4]  Padronizacao Automatica" -ForegroundColor Magenta
-        Write-Host " [5]  Padronizacao Manual" -ForegroundColor Cyan
-        Write-Host " [6]  Sair" -ForegroundColor Red
+        Write-Host " [4]  GUI Padronizacao" -ForegroundColor Yellow
+        Write-Host " [5]  Padronizacao Automatica" -ForegroundColor Magenta
+        Write-Host " [6]  Padronizacao Manual" -ForegroundColor Cyan
+        Write-Host " [7]  Sair" -ForegroundColor Red
         Write-Host ""
         Write-Host "==================================================="  -ForegroundColor Cyan
 
@@ -1296,9 +1675,10 @@ function Show-Menu {
                 "1" { Get-PCInfo; Pause }
                 "2" { Get-WindowsKey; Pause }
                 "3" { Activate-WindowsOffice; Pause }
-                "4" { Start-AutoPadronizacao; Pause }
-                "5" { Show-ManualMenu }
-                "6" {
+                "4" { Show-PadronizacaoGUI }
+                "5" { Start-AutoPadronizacao; Pause }
+                "6" { Show-ManualMenu }
+                "7" {
                     Write-Host "Saindo do programa..." -ForegroundColor Yellow
                     Exit
                 }
@@ -1311,7 +1691,7 @@ function Show-Menu {
             Write-Host " [ERRO] Ocorreu um erro ao executar a operacao: $($_.Exception.Message)" -ForegroundColor Red
             Pause
         }
-    } while ($option -ne "6")
+    } while ($option -ne "7")
 }
 
 # Funcao para avisar o usuario como reiniciar o script como administrador
