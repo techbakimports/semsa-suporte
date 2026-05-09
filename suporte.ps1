@@ -313,7 +313,7 @@ function Install-StandardPrograms {
         @{
             Id="Oracle.JavaRuntimeEnvironment"
             Name="Java"
-            ChocoId="jdk8"
+            ChocoId="Temurin8jre"
             LocalPath="\\balbina\f$\INSTALL_SEMSA-2023\_Jav\jre-8u421-windows-x64.exe"
             LocalArgs="/s"
         },
@@ -845,7 +845,6 @@ function Start-AutoPadronizacao {
     $progsOk     = @()
     $progsFail   = @()
     $stChoco     = $null
-    $stVncConfig = $null; $stVncPortVal = ""
 
     # ----------------------------------------------------------
     # ETAPA 1: Fuso horario (Manaus - automatico, sem interacao)
@@ -961,7 +960,12 @@ function Start-AutoPadronizacao {
     Write-Host "  [6/7] Criando conta de administrador local..." -ForegroundColor Cyan
     try {
         if (-not (Get-LocalUser -Name "admin" -ErrorAction SilentlyContinue)) {
-            New-LocalUser -Name "admin" -NoPassword -Description "Conta de administrador criada via script" -ErrorAction Stop -PasswordNeverExpires $true
+            try {
+                New-LocalUser -Name "admin" -NoPassword -Description "Conta de administrador criada via script" -ErrorAction Stop -PasswordNeverExpires $true
+            } catch {
+                $netOut = net user admin "" /add /y 2>&1
+                if ($LASTEXITCODE -ne 0) { throw "Falha ao criar conta admin: $netOut" }
+            }
             Write-Host "  [SUCESSO] Conta 'admin' criada." -ForegroundColor Green
             $stAdminMsg = "Conta criada"
         } else {
@@ -1033,15 +1037,14 @@ function Start-AutoPadronizacao {
         $stChoco = "OK"
 
         $autoPrograms = @(
-            @{ ChocoId = "jre8";              Name = "Java" },
+            @{ ChocoId = "Temurin8jre";       Name = "Java (JRE)" },
             @{ ChocoId = "winrar";            Name = "WinRAR" },
             @{ ChocoId = "vlc";               Name = "VLC" },
             @{ ChocoId = "FoxitReader";       Name = "Foxit Reader" },
             @{ ChocoId = "pdf24";             Name = "PDF24" },
             @{ ChocoId = "libreoffice-still"; Name = "LibreOffice" },
-            @{ ChocoId = "GoogleChrome";      Name = "Google Chrome" },
-            @{ ChocoId = "Firefox";           Name = "Mozilla Firefox" },
-            @{ ChocoId = "ultravnc";          Name = "UltraVNC" }
+            @{ ChocoId = "GoogleChrome";      Name = "Google Chrome"; ExtraArgs = "--ignore-checksums" },
+            @{ ChocoId = "Firefox";           Name = "Mozilla Firefox" }
         )
 
         Write-Host "  Instalando $($autoPrograms.Count) programas sequencialmente..." -ForegroundColor DarkGray
@@ -1060,7 +1063,11 @@ function Start-AutoPadronizacao {
 
             Write-Host "  [$progIdx/$($autoPrograms.Count)] $($prog.Name)" -ForegroundColor Cyan
 
-            choco install $prog.ChocoId -y --no-progress
+            $chocoArgs = @($prog.ChocoId, '-y', '--no-progress')
+            if ($prog.ContainsKey('ExtraArgs') -and $prog.ExtraArgs) {
+                $chocoArgs += $prog.ExtraArgs.Split(' ')
+            }
+            & choco install @chocoArgs
             $exitCode = $LASTEXITCODE
 
             $elapsed = [math]::Round(((Get-Date) - $progStart).TotalSeconds)
@@ -1084,82 +1091,25 @@ function Start-AutoPadronizacao {
     Write-Host ""
 
     # ----------------------------------------------------------
-    # CONFIGURACAO POS-INSTALACAO: UltraVNC (porta e senha)
+    # ULTRAVNC: Instalacao interativa (por ultimo)
     # ----------------------------------------------------------
+    Write-Host "  [ULTRAVNC] Abrindo instalador do UltraVNC..." -ForegroundColor Cyan
+    Write-Host "  [INFO] O instalador sera aberto. Configure porta, senha e opcoes desejadas," -ForegroundColor Yellow
+    Write-Host "  [INFO] depois clique em Instalar. O script aguarda a conclusao." -ForegroundColor Yellow
+    Write-Host ""
 
-    # Iniciar servico para garantir criacao do ini, aguardar ate 20s
-    $svcVnc = Get-Service -Name "uvnc_service" -ErrorAction SilentlyContinue
-    if ($svcVnc -and $svcVnc.Status -ne "Running") {
-        Start-Service "uvnc_service" -ErrorAction SilentlyContinue
-        Start-Sleep -Seconds 3
-    }
+    $vncStart = Get-Date
+    choco install ultravnc --override-arguments --install-arguments="/SP- /NORESTART" -y
+    $vncExit    = $LASTEXITCODE
+    $vncElapsed = [math]::Round(((Get-Date) - $vncStart).TotalSeconds)
+    $vncTimeStr = if ($vncElapsed -ge 60) { "$([math]::Floor($vncElapsed/60))m$($vncElapsed%60)s" } else { "${vncElapsed}s" }
 
-    $vncPossiblePaths = @(
-        "C:\Program Files\uvnc bvba\UltraVNC\ultravnc.ini",
-        "C:\Program Files (x86)\uvnc bvba\UltraVNC\ultravnc.ini"
-    )
-    $vncIniPath = $null
-    $vncDeadline = (Get-Date).AddSeconds(20)
-    do {
-        $vncIniPath = $vncPossiblePaths | Where-Object { Test-Path $_ } | Select-Object -First 1
-        if (-not $vncIniPath) { Start-Sleep -Seconds 2 }
-    } while (-not $vncIniPath -and (Get-Date) -lt $vncDeadline)
-
-    # Se o diretorio existe mas o ini ainda nao foi criado, criar um minimo
-    if (-not $vncIniPath) {
-        $vncDir = @("C:\Program Files\uvnc bvba\UltraVNC", "C:\Program Files (x86)\uvnc bvba\UltraVNC") |
-                  Where-Object { Test-Path $_ } | Select-Object -First 1
-        if ($vncDir) {
-            $vncIniPath = "$vncDir\ultravnc.ini"
-            "[ultravnc]`r`nPortNumber=5900`r`npasswd=" | Set-Content $vncIniPath -Encoding Default
-        }
-    }
-
-    if ($vncIniPath) {
-        Write-Host "  Configurando UltraVNC..." -ForegroundColor Cyan
-
-        $vncPortInput = Read-Host "  Porta do UltraVNC (pressione Enter para usar 5900)"
-        $stVncPortVal = if ([string]::IsNullOrWhiteSpace($vncPortInput)) { "5900" } else { $vncPortInput.Trim() }
-
-        $vncPassSecure = Read-Host "  Senha do UltraVNC" -AsSecureString
-        $vncPassPlain  = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
-                             [Runtime.InteropServices.Marshal]::SecureStringToBSTR($vncPassSecure))
-
-        try {
-            $encPass      = ConvertTo-VNCPassword -Password $vncPassPlain
-            $vncPassPlain = $null  # limpa da memoria
-
-            $portSet = $false; $passSet = $false
-            $lines = Get-Content $vncIniPath | ForEach-Object {
-                if ($_ -match "^PortNumber=") { "PortNumber=$stVncPortVal"; $portSet = $true }
-                elseif ($_ -match "^passwd=")  { "passwd=$encPass";         $passSet = $true }
-                else { $_ }
-            }
-            if (-not $portSet -or -not $passSet) {
-                $newLines = @()
-                foreach ($line in $lines) {
-                    $newLines += $line
-                    if ($line -match "^\[ultravnc\]") {
-                        if (-not $portSet) { $newLines += "PortNumber=$stVncPortVal"; $portSet = $true }
-                        if (-not $passSet) { $newLines += "passwd=$encPass";          $passSet = $true }
-                    }
-                }
-                $lines = $newLines
-            }
-            $lines | Set-Content $vncIniPath
-
-            $svc = Get-Service -Name "uvnc_service" -ErrorAction SilentlyContinue
-            if ($svc) { Restart-Service -Name "uvnc_service" -Force -ErrorAction SilentlyContinue }
-
-            $stVncConfig = "OK"
-            Write-Host "  [SUCESSO] UltraVNC configurado na porta $stVncPortVal." -ForegroundColor Green
-        } catch {
-            $stVncConfig = "ERRO"
-            Write-Host "  [ERRO] Falha ao configurar UltraVNC: $($_.Exception.Message)" -ForegroundColor Red
-        }
+    if ($vncExit -eq 0) {
+        $progsOk += "UltraVNC"
+        Write-Host "  [OK]   UltraVNC instalado em $vncTimeStr" -ForegroundColor Green
     } else {
-        $stVncConfig = "IGNORADO"
-        Write-Host "  [INFO] UltraVNC nao encontrado - configuracao ignorada." -ForegroundColor DarkGray
+        $progsFail += "UltraVNC"
+        Write-Host "  [ERRO] UltraVNC falhou em $vncTimeStr (codigo: $vncExit)" -ForegroundColor Red
     }
     Write-Host ""
 
@@ -1234,29 +1184,6 @@ function Start-AutoPadronizacao {
         Write-Host "[ERRO] " -ForegroundColor Red -NoNewline
         Write-Host "$padProg" -NoNewline
         Write-Host "-> $($progsOk.Count)/$totalProgs OK | Falhas: $($progsFail -join ', ')" -ForegroundColor Yellow
-    }
-
-    # Linha UltraVNC config
-    $padVnc = "UltraVNC config".PadRight(22)
-    switch ($stVncConfig) {
-        "OK" {
-            Write-Host "   " -NoNewline
-            Write-Host "[OK]   " -ForegroundColor Green -NoNewline
-            Write-Host "$padVnc" -NoNewline
-            Write-Host "-> Porta: $stVncPortVal | Senha configurada" -ForegroundColor White
-        }
-        "ERRO" {
-            Write-Host "   " -NoNewline
-            Write-Host "[ERRO] " -ForegroundColor Red -NoNewline
-            Write-Host "$padVnc" -NoNewline
-            Write-Host "-> Falhou ao gravar configuracao" -ForegroundColor Red
-        }
-        "IGNORADO" {
-            Write-Host "   " -NoNewline
-            Write-Host "[ -- ] " -ForegroundColor DarkGray -NoNewline
-            Write-Host "$padVnc" -NoNewline
-            Write-Host "-> UltraVNC nao instalado" -ForegroundColor DarkGray
-        }
     }
 
     Write-Host ""
