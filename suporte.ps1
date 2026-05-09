@@ -825,7 +825,7 @@ function Start-AutoPadronizacao {
     Write-Host "   4. Nome do computador" -ForegroundColor DarkCyan
     Write-Host "   5. Ingresso no dominio" -ForegroundColor DarkCyan
     Write-Host "   6. Conta de administrador local" -ForegroundColor DarkCyan
-    Write-Host "   7. Instalacao de programas padrao (winget)" -ForegroundColor DarkCyan
+    Write-Host "   7. Instalacao de programas padrao (Chocolatey)" -ForegroundColor DarkCyan
     Write-Host ""
     Write-Host "  Etapas que exigirem reinicializacao serao acumuladas" -ForegroundColor DarkGray
     Write-Host "  e voce escolhera reiniciar ao final." -ForegroundColor DarkGray
@@ -844,7 +844,7 @@ function Start-AutoPadronizacao {
     $stAdmin     = $null; $stAdminMsg = ""
     $progsOk     = @()
     $progsFail   = @()
-    $stWinget    = $null
+    $stChoco     = $null
     $stVncConfig = $null; $stVncPortVal = ""
 
     # ----------------------------------------------------------
@@ -988,31 +988,60 @@ function Start-AutoPadronizacao {
     Write-Host ""
 
     # ----------------------------------------------------------
-    # ETAPA 7: Instalacao de programas via winget (paralelo)
+    # ETAPA 7: Instalacao de programas via Chocolatey
     # ----------------------------------------------------------
-    Write-Host "  [7/7] Instalando programas padrao via winget..." -ForegroundColor Cyan
+    Write-Host "  [7/7] Instalando programas padrao via Chocolatey..." -ForegroundColor Cyan
 
-    if (!(Get-Command winget -ErrorAction SilentlyContinue)) {
-        $stWinget = "ERRO"
-        Write-Host "  [ERRO] Winget nao encontrado. Instalacao ignorada." -ForegroundColor Red
+    $chocoInstalled = $false
+    if (Get-Command choco -ErrorAction SilentlyContinue) {
+        $chocoInstalled = $true
+        Write-Host "  [INFO] Chocolatey ja esta instalado." -ForegroundColor DarkGray
     } else {
-        $stWinget = "OK"
+        Write-Host "  [INFO] Chocolatey nao encontrado. Instalando..." -ForegroundColor Yellow
+        try {
+            Set-ExecutionPolicy Bypass -Scope Process -Force
+            [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
+            Invoke-Expression ((New-Object System.Net.WebClient).DownloadString('https://chocolatey.org/install.ps1'))
 
-        Write-Host "  [INFO] Atualizando fontes do winget (aceite de termos exigido na primeira execucao)..." -ForegroundColor Cyan
-        winget source update
-        Write-Host ""
+            # Recarrega o PATH para reconhecer o choco recem instalado
+            $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" +
+                        [System.Environment]::GetEnvironmentVariable("Path", "User")
 
-        # Kaspersky nao esta no repositorio publico do winget - instalar via servidor local.
+            if (Get-Command choco -ErrorAction SilentlyContinue) {
+                $chocoInstalled = $true
+                Write-Host "  [SUCESSO] Chocolatey instalado com sucesso." -ForegroundColor Green
+            } else {
+                throw "Chocolatey instalado mas nao reconhecido no PATH."
+            }
+        } catch {
+            $stChoco = "ERRO"
+            Write-Host ""
+            Write-Host "  [ERRO] Falha ao instalar o Chocolatey: $($_.Exception.Message)" -ForegroundColor Red
+            Write-Host ""
+            Write-Host "  [COMO CORRIGIR]" -ForegroundColor Yellow
+            Write-Host "  1. Abra o PowerShell como Administrador" -ForegroundColor Yellow
+            Write-Host "  2. Execute: Set-ExecutionPolicy Bypass -Scope Process -Force" -ForegroundColor Yellow
+            Write-Host "  3. Execute: [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072" -ForegroundColor Yellow
+            Write-Host "  4. Execute: iex ((New-Object System.Net.WebClient).DownloadString('https://chocolatey.org/install.ps1'))" -ForegroundColor Yellow
+            Write-Host "  5. Feche e reabra o PowerShell, depois tente a padronizacao novamente." -ForegroundColor Yellow
+            Write-Host ""
+            Write-Host "  [INFO] Instalacao de programas ignorada devido a falha no Chocolatey." -ForegroundColor DarkGray
+        }
+    }
+
+    if ($chocoInstalled) {
+        $stChoco = "OK"
+
         $autoPrograms = @(
-            @{ Id = "Oracle.JavaRuntimeEnvironment";       Name = "Java" },
-            @{ Id = "RARLab.WinRAR";                       Name = "WinRAR" },
-            @{ Id = "VideoLAN.VLC";                        Name = "VLC" },
-            @{ Id = "Foxit.FoxitReader";                   Name = "Foxit Reader" },
-            @{ Id = "geeksoftwareGmbH.PDF24Creator";       Name = "PDF24" },
-            @{ Id = "TheDocumentFoundation.LibreOffice";   Name = "LibreOffice" },
-            @{ Id = "Google.Chrome";                       Name = "Google Chrome" },
-            @{ Id = "Mozilla.Firefox";                     Name = "Mozilla Firefox" },
-            @{ Id = "uvncbvba.UltraVNC";                   Name = "UltraVNC" }
+            @{ ChocoId = "jre8";              Name = "Java" },
+            @{ ChocoId = "winrar";            Name = "WinRAR" },
+            @{ ChocoId = "vlc";               Name = "VLC" },
+            @{ ChocoId = "FoxitReader";       Name = "Foxit Reader" },
+            @{ ChocoId = "pdf24";             Name = "PDF24" },
+            @{ ChocoId = "libreoffice-still"; Name = "LibreOffice" },
+            @{ ChocoId = "GoogleChrome";      Name = "Google Chrome" },
+            @{ ChocoId = "Firefox";           Name = "Mozilla Firefox" },
+            @{ ChocoId = "ultravnc";          Name = "UltraVNC" }
         )
 
         Write-Host "  Instalando $($autoPrograms.Count) programas sequencialmente..." -ForegroundColor DarkGray
@@ -1025,30 +1054,29 @@ function Start-AutoPadronizacao {
             $progIdx++
             $progStart = Get-Date
 
-            Write-Progress -Activity "Instalando programas via winget" `
+            Write-Progress -Activity "Instalando programas via Chocolatey" `
                            -Status "[$progIdx/$($autoPrograms.Count)] $($prog.Name)" `
                            -PercentComplete (($progIdx - 1) / $autoPrograms.Count * 100)
 
             Write-Host "  [$progIdx/$($autoPrograms.Count)] $($prog.Name)" -ForegroundColor Cyan
 
-            winget install --id $prog.Id --exact --silent --accept-source-agreements --accept-package-agreements
+            choco install $prog.ChocoId -y --no-progress
             $exitCode = $LASTEXITCODE
 
             $elapsed = [math]::Round(((Get-Date) - $progStart).TotalSeconds)
             $timeStr = if ($elapsed -ge 60) { "$([math]::Floor($elapsed/60))m$($elapsed%60)s" } else { "${elapsed}s" }
-            $success = ($exitCode -eq 0) -or ($exitCode -eq -1978335212)
 
-            if ($success) {
+            if ($exitCode -eq 0) {
                 $progsOk += $prog.Name
                 Write-Host "  [OK]   $($prog.Name.PadRight(18)) concluido em $timeStr" -ForegroundColor Green
             } else {
                 $progsFail += $prog.Name
-                Write-Host "  [ERRO] $($prog.Name.PadRight(18)) falhou em $timeStr" -ForegroundColor Red
+                Write-Host "  [ERRO] $($prog.Name.PadRight(18)) falhou em $timeStr (codigo: $exitCode)" -ForegroundColor Red
             }
             Write-Host ""
         }
 
-        Write-Progress -Activity "Instalando programas via winget" -Completed
+        Write-Progress -Activity "Instalando programas via Chocolatey" -Completed
 
         $total = [math]::Round(((Get-Date) - $globalStart).TotalSeconds)
         Write-Host "  Instalacoes finalizadas em $([math]::Floor($total/60))m$($total%60)s | $($progsOk.Count) OK / $($progsFail.Count) falha(s)" -ForegroundColor DarkGray
@@ -1189,23 +1217,23 @@ function Start-AutoPadronizacao {
     }
 
     # Linha de programas (logica separada por ser mais complexa)
-    $padProg = "Programas (winget)".PadRight(22)
-    if ($stWinget -eq "ERRO") {
+    $padProg = "Programas (choco)".PadRight(22)
+    if ($stChoco -eq "ERRO") {
         Write-Host "   " -NoNewline
         Write-Host "[ERRO] " -ForegroundColor Red -NoNewline
         Write-Host "$padProg" -NoNewline
-        Write-Host "-> winget nao encontrado no sistema" -ForegroundColor Red
-    } elseif ($progsFail.Count -eq 0) {
+        Write-Host "-> Falha na instalacao do Chocolatey (veja instrucoes acima)" -ForegroundColor Red
+    } elseif ($stChoco -eq "OK" -and $progsFail.Count -eq 0) {
         Write-Host "   " -NoNewline
         Write-Host "[OK]   " -ForegroundColor Green -NoNewline
         Write-Host "$padProg" -NoNewline
         Write-Host "-> $($progsOk.Count) de $($progsOk.Count) instalados com sucesso" -ForegroundColor White
-    } else {
-        $total = $progsOk.Count + $progsFail.Count
+    } elseif ($stChoco -eq "OK") {
+        $totalProgs = $progsOk.Count + $progsFail.Count
         Write-Host "   " -NoNewline
         Write-Host "[ERRO] " -ForegroundColor Red -NoNewline
         Write-Host "$padProg" -NoNewline
-        Write-Host "-> $($progsOk.Count)/$total OK | Falhas: $($progsFail -join ', ')" -ForegroundColor Yellow
+        Write-Host "-> $($progsOk.Count)/$totalProgs OK | Falhas: $($progsFail -join ', ')" -ForegroundColor Yellow
     }
 
     # Linha UltraVNC config
