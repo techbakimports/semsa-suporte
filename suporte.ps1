@@ -1114,6 +1114,28 @@ function Start-AutoPadronizacao {
     Write-Host ""
 
     # ----------------------------------------------------------
+    # AVISO: Etapas manuais restantes
+    # ----------------------------------------------------------
+    Write-Host "  ==========================================================" -ForegroundColor Yellow
+    Write-Host "              ATENCAO — ETAPAS MANUAIS RESTANTES" -ForegroundColor Yellow
+    Write-Host "  ==========================================================" -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "  As etapas abaixo NAO foram automatizadas e devem ser" -ForegroundColor White
+    Write-Host "  realizadas manualmente antes de entregar a maquina:" -ForegroundColor White
+    Write-Host ""
+    Write-Host "   [1] CERTIFICADO FORTINET" -ForegroundColor Cyan
+    Write-Host "       Importar o certificado Fortinet nos certificados" -ForegroundColor White
+    Write-Host "       confiaveis da maquina (certmgr.msc)." -ForegroundColor White
+    Write-Host ""
+    Write-Host "   [2] KASPERSKY" -ForegroundColor Cyan
+    Write-Host "       Instalar e ativar o Kaspersky manualmente." -ForegroundColor White
+    Write-Host "       Instalador disponivel em:" -ForegroundColor White
+    Write-Host "       \\balbina\suporte\Kasper ok\" -ForegroundColor DarkCyan
+    Write-Host ""
+    Write-Host "  ==========================================================" -ForegroundColor Yellow
+    Write-Host ""
+
+    # ----------------------------------------------------------
     # RESUMO VISUAL FINAL
     # ----------------------------------------------------------
     Write-Host "  ==========================================================" -ForegroundColor Cyan
