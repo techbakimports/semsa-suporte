@@ -1572,7 +1572,7 @@ function Show-PadronizacaoGUI {
             # Status da licenca via slmgr (sem prompt)
             $tmp = [System.IO.Path]::GetTempFileName()
             Start-Process "cscript.exe" -ArgumentList "//Nologo $env:windir\system32\slmgr.vbs /xpr" -NoNewWindow -Wait -RedirectStandardOutput $tmp
-            $status = (Get-Content $tmp -Raw -EA SilentlyContinue).Trim()
+            $status = (Get-Content $tmp -Raw -Encoding OEM -EA SilentlyContinue).Trim()
             Remove-Item $tmp -Force -EA SilentlyContinue
             if ($status) { & $log "  Status: $status" $corTexto }
         } catch {
