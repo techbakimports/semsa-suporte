@@ -1559,7 +1559,25 @@ function Show-PadronizacaoGUI {
     $btnChave.Add_Click({
         $btnChave.Enabled = $false
         & $sepLog "CHAVE DO WINDOWS"
-        & $capturar { Get-WindowsKey }
+        try {
+            $key = (Get-WmiObject -Class SoftwareLicensingService -EA Stop).OA3xOriginalProductKey
+            if (-not $key) {
+                $key = (Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\SoftwareProtectionPlatform" -Name BackupProductKeyDefault -EA SilentlyContinue).BackupProductKeyDefault
+            }
+            if ($key) {
+                & $log "  Chave: $key" $corOk
+            } else {
+                & $log "  [AVISO] Chave nao encontrada via WMI nem registro." $corAviso
+            }
+            # Status da licenca via slmgr (sem prompt)
+            $tmp = [System.IO.Path]::GetTempFileName()
+            Start-Process "cscript.exe" -ArgumentList "//Nologo $env:windir\system32\slmgr.vbs /xpr" -NoNewWindow -Wait -RedirectStandardOutput $tmp
+            $status = (Get-Content $tmp -Raw -EA SilentlyContinue).Trim()
+            Remove-Item $tmp -Force -EA SilentlyContinue
+            if ($status) { & $log "  Status: $status" $corTexto }
+        } catch {
+            & $log "  [ERRO] $($_.Exception.Message)" $corErro
+        }
         $btnChave.Enabled = $true
     })
 
