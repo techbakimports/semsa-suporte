@@ -2138,28 +2138,13 @@ function Restart-ScriptAsAdmin {
 $isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 
 if (-not $isAdmin) {
-    Write-Host "`n[AVISO IMPORTANTE] Este script contem funcoes que requerem privilegios administrativos." -ForegroundColor Yellow
-Write-Host "Algumas operacoes podem falhar se o script nao for executado como Administrador." -ForegroundColor Yellow
-    
-    $restart = Read-Host "Deseja tentar ser instruido sobre como executar o script como Administrador? (S/N)"
-    if ($restart -eq 'S' -or $restart -eq 's') {
-        $success = Restart-ScriptAsAdmin
-        
-        if (-not $success) {
-            $scriptPath = $MyInvocation.MyCommand.Path
-            if (-not [string]::IsNullOrEmpty($scriptPath)) {
-                Write-Host "`n[ALTERNATIVA] Voce pode fechar este script e abrir o PowerShell manualmente como administrador:" -ForegroundColor Yellow
-                Write-Host "1. Clique com o botao direito no icone do PowerShell" -ForegroundColor Yellow
-                Write-Host "2. Selecione 'Executar como administrador'" -ForegroundColor Yellow
-                Write-Host "3. Navegue ate a pasta do script: cd $($PWD.Path)" -ForegroundColor Yellow
-                Write-Host "4. Execute o script: .\$(Split-Path $scriptPath -Leaf)" -ForegroundColor Yellow
-            }
-        }
-    }
-    
-    Write-Host "`nContinuando sem privilegios administrativos. Algumas funcoes podem nao funcionar corretamente." -ForegroundColor Yellow
-    Write-Host "Pressione qualquer tecla para continuar..." -ForegroundColor Yellow
-    $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+    Add-Type -AssemblyName System.Windows.Forms
+    [System.Windows.Forms.MessageBox]::Show(
+        "Este script nao esta sendo executado como Administrador.`n`nAlgumas funcoes podem falhar (configuracoes de registro, firewall, servicos).`n`nFeche e reabra o PowerShell como Administrador para funcionalidade completa.",
+        "Aviso — Sem privilegios administrativos",
+        [System.Windows.Forms.MessageBoxButtons]::OK,
+        [System.Windows.Forms.MessageBoxIcon]::Warning
+    ) | Out-Null
 }
 
 # Por ultimo, abrimos a GUI principal
