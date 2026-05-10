@@ -1915,6 +1915,7 @@ function Show-PadronizacaoGUI {
                 $runChoco = {
                     param([string]$chocoArgs)
                     $tmpFile = [System.IO.Path]::GetTempFileName()
+                    $exitCode = $null
                     try {
                         $proc = Start-Process -FilePath "choco" -ArgumentList $chocoArgs `
                             -RedirectStandardOutput $tmpFile -NoNewWindow -PassThru
@@ -1927,7 +1928,7 @@ function Show-PadronizacaoGUI {
                                 $linhas = $conteudo -split "`r?`n"
                                 for ($i = $linhasVistas; $i -lt ($linhas.Count - 1); $i++) {
                                     $t = $linhas[$i].Trim()
-                                    if ($t) { & $log "        $t" $corTexto }
+                                    if ($t -and $t -notmatch '^Progress:') { & $log "        $t" $corTexto }
                                 }
                                 $linhasVistas = [Math]::Max($linhas.Count - 1, $linhasVistas)
                             } catch {}
@@ -1935,6 +1936,7 @@ function Show-PadronizacaoGUI {
                             Start-Sleep -Milliseconds 300
                         }
                         $proc.WaitForExit()
+                        $exitCode = [int]$proc.ExitCode
                         try {
                             $fs = [System.IO.FileStream]::new($tmpFile, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
                             $sr = New-Object System.IO.StreamReader($fs)
@@ -1942,13 +1944,13 @@ function Show-PadronizacaoGUI {
                             $linhas = $conteudo -split "`r?`n"
                             for ($i = $linhasVistas; $i -lt $linhas.Count; $i++) {
                                 $t = $linhas[$i].Trim()
-                                if ($t) { & $log "        $t" $corTexto }
+                                if ($t -and $t -notmatch '^Progress:') { & $log "        $t" $corTexto }
                             }
                         } catch {}
-                        return $proc.ExitCode
                     } finally {
                         Remove-Item $tmpFile -EA SilentlyContinue
                     }
+                    return $exitCode
                 }
 
                 foreach ($p in $selecionados) {
