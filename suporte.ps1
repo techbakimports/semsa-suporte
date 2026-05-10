@@ -1522,7 +1522,7 @@ function Show-PadronizacaoGUI {
 
     $sepLog = {
         param([string]$titulo)
-        & $log "" $corInfo
+        $rtbLog.Clear()
         & $log "  ================================================" $corDestaque
         & $log "   $titulo" $corAmarelo
         & $log "  ================================================" $corDestaque
