@@ -787,6 +787,15 @@ function Create-AdminAccount {
         } else {
             Write-Host " [INFO] A conta 'admin' ja pertence ao grupo '$groupName'." -ForegroundColor Yellow
         }
+
+        # Remover do grupo Usuarios (adicionado automaticamente pelo Windows ao criar o usuario)
+        $usersGroup = (Get-LocalGroup | Where-Object { $_.SID -match "S-1-5-32-545" }).Name
+        if (-not $usersGroup) { $usersGroup = "Usuarios" }
+        $usersMembers = Get-LocalGroupMember -Group $usersGroup -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Name
+        if ($usersMembers -contains "$env:COMPUTERNAME\admin" -or $usersMembers -contains "admin") {
+            Remove-LocalGroupMember -Group $usersGroup -Member "admin" -ErrorAction SilentlyContinue
+            Write-Host " [INFO] Conta 'admin' removida do grupo '$usersGroup'." -ForegroundColor Yellow
+        }
     } catch {
         Write-Host " [ERRO] Falha ao criar conta 'admin': $($_.Exception.Message)" -ForegroundColor Red
     }
@@ -983,6 +992,15 @@ function Start-AutoPadronizacao {
         } else {
             Write-Host "  [INFO] Conta 'admin' ja pertence ao grupo '$groupName'." -ForegroundColor DarkGray
             $stAdminMsg += " | ja era membro do grupo '$groupName'"
+        }
+
+        # Remover do grupo Usuarios (adicionado automaticamente pelo Windows ao criar o usuario)
+        $usersGroup = (Get-LocalGroup | Where-Object { $_.SID -match "S-1-5-32-545" }).Name
+        if (-not $usersGroup) { $usersGroup = "Usuarios" }
+        $usersMembers = Get-LocalGroupMember -Group $usersGroup -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Name
+        if ($usersMembers -contains "$env:COMPUTERNAME\admin" -or $usersMembers -contains "admin") {
+            Remove-LocalGroupMember -Group $usersGroup -Member "admin" -ErrorAction SilentlyContinue
+            Write-Host "  [INFO] Conta 'admin' removida do grupo '$usersGroup'." -ForegroundColor DarkGray
         }
         $stAdmin = "OK"
     } catch {
@@ -1653,6 +1671,13 @@ function Show-PadronizacaoGUI {
             $mem = Get-LocalGroupMember -Group $grp | Select-Object -ExpandProperty Name
             if ($mem -notcontains "$env:COMPUTERNAME\admin" -and $mem -notcontains "admin") {
                 Add-LocalGroupMember -Group $grp -Member "admin" -EA Stop
+            }
+            # Remover do grupo Usuarios (adicionado automaticamente pelo Windows ao criar o usuario)
+            $usersGrp = (Get-LocalGroup | Where-Object { $_.SID -match "S-1-5-32-545" }).Name
+            if (-not $usersGrp) { $usersGrp = "Usuarios" }
+            $usersMem = Get-LocalGroupMember -Group $usersGrp -EA SilentlyContinue | Select-Object -ExpandProperty Name
+            if ($usersMem -contains "$env:COMPUTERNAME\admin" -or $usersMem -contains "admin") {
+                Remove-LocalGroupMember -Group $usersGrp -Member "admin" -EA SilentlyContinue
             }
             & $log "  [OK] Conta admin configurada no grupo '$grp'." $corOk
         } catch { & $log "  [ERRO] $($_.Exception.Message)" $corErro }
