@@ -1135,7 +1135,7 @@ function Start-AutoPadronizacao {
     # AVISO: Etapas manuais restantes
     # ----------------------------------------------------------
     Write-Host "  ==========================================================" -ForegroundColor Yellow
-    Write-Host "              ATENCAO — ETAPAS MANUAIS RESTANTES" -ForegroundColor Yellow
+    Write-Host "              ATENCAO -- ETAPAS MANUAIS RESTANTES" -ForegroundColor Yellow
     Write-Host "  ==========================================================" -ForegroundColor Yellow
     Write-Host ""
     Write-Host "  As etapas abaixo NAO foram automatizadas e devem ser" -ForegroundColor White
@@ -2186,7 +2186,7 @@ if (-not $isAdmin) {
     Add-Type -AssemblyName System.Windows.Forms
     [System.Windows.Forms.MessageBox]::Show(
         "Este script nao esta sendo executado como Administrador.`n`nAlgumas funcoes podem falhar (configuracoes de registro, firewall, servicos).`n`nFeche e reabra o PowerShell como Administrador para funcionalidade completa.",
-        "Aviso — Sem privilegios administrativos",
+        "Aviso -- Sem privilegios administrativos",
         [System.Windows.Forms.MessageBoxButtons]::OK,
         [System.Windows.Forms.MessageBoxIcon]::Warning
     ) | Out-Null
