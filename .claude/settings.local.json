@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(git push *)"
+      "Bash(git push *)",
+      "PowerShell($null = [System.Management.Automation.Language.Parser]::ParseFile\\(\"D:\\\\Documentos\\\\Projetos-Dev\\\\semsa-suporte\\\\suporte.ps1\", [ref]$null, [ref]$errors\\); if \\($errors.Count -eq 0\\) { \"OK - sem erros de parse\" } else { $errors | ForEach-Object { $_.ToString\\(\\) } })"
     ]
   }
 }

@@ -4,9 +4,10 @@
 Script PowerShell de suporte técnico corporativo para a Semsa/Manaus. Padroniza configuração de PCs, instala programas, habilita RDP/VNC/assistência remota e faz ingresso em domínio.
 
 ## Stack
-- PowerShell 5.1+ (script principal com 2197 linhas)
+- PowerShell 5.1+ (script principal com ~1209 linhas)
 - .NET Framework: System.Windows.Forms, System.Drawing, System.Security.Cryptography
 - Batch (.bat) como wrapper para elevação UAC
+- Encoding: UTF-8 sem BOM (crítico para PS 5.1 e `irm | iex`)
 
 ## Comandos
 ```powershell
@@ -20,19 +21,16 @@ powershell -ExecutionPolicy Bypass -File .\suporte.ps1
 .\SEMSA_SUPORTE.bat
 ```
 
-## Funções principais (suporte.ps1)
-| Função | Descrição |
-|--------|-----------|
-| `Get-PCInfo` | Hardware: SO, CPU, RAM, discos, impressoras |
-| `Get-WindowsKey` | Recupera chave de ativação Windows |
-| `Activate-WindowsOffice` | Ativa Windows/Office |
-| `Install-StandardPrograms` | Instala pacote corporativo (Winget/Chocolatey/rede local) |
-| `Enable-RemoteAssistance` | Configura assistência remota |
-| `Enable-RemoteDesktop` | Habilita RDP |
-| `Set-ComputerName` | Renomeia o computador |
-| `Set-DomainName` | Ingressa em domínio Active Directory |
-| `Create-AdminAccount` | Cria usuário administrador local |
-| `Show-PadronizacaoGUI` | Interface gráfica Windows Forms para padronização completa |
+## Funções (suporte.ps1) — GUI-only, 3 funções
+| Função | Linha | Descrição |
+|--------|-------|-----------|
+| `Get-PCInfo` | 5 | Hardware: SO, CPU, RAM, discos, impressoras (usa Get-CimInstance) |
+| `Test-RemoteAssistance` | 185 | Diagnóstico de Assistência Remota com output colorido |
+| `Show-PadronizacaoGUI` | 251 | GUI WinForms dark theme — entry point único do script |
+
+### GUI: etapas de padronização (dentro de Show-PadronizacaoGUI)
+1. Fuso horário  2. Assistência Remota  3. RDP  4. Renomear PC (opcional)
+5. Ingressar domínio (opcional)  6. Conta admin  7. Instalar programas (Chocolatey ou Standalone)
 
 ## Programas corporativos pré-configurados
 Java 8, WinRAR, VLC, Foxit Reader, PDF24, LibreOffice, Chrome, Firefox, Kaspersky AV, UltraVNC, Fusion
