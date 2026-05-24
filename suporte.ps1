@@ -247,6 +247,40 @@ Write-Host "Execute a funcao Enable-RemoteAssistance novamente para corrigir os 
     }
 }
 
+function Set-AdminAccount {
+    if (-not (Get-LocalUser -Name "admin" -EA SilentlyContinue)) {
+        try {
+            New-LocalUser -Name "admin" -NoPassword -Description "Conta criada via GUI" -PasswordNeverExpires $true -EA Stop
+        } catch {
+            $r = net user admin "" /add /y 2>&1
+            if ($LASTEXITCODE -ne 0) { throw "net user falhou: $r" }
+        }
+    }
+    Set-LocalUser -Name "admin" -PasswordNeverExpires $true -EA SilentlyContinue
+    $grp = (Get-LocalGroup | Where-Object { $_.SID -match "S-1-5-32-544" }).Name
+    if (-not $grp) { $grp = "Administradores" }
+    $mem = Get-LocalGroupMember -Group $grp | Select-Object -ExpandProperty Name
+    if ($mem -notcontains "$env:COMPUTERNAME\admin" -and $mem -notcontains "admin") {
+        Add-LocalGroupMember -Group $grp -Member "admin" -EA Stop
+    }
+    $usersGrp = (Get-LocalGroup | Where-Object { $_.SID -match "S-1-5-32-545" }).Name
+    if (-not $usersGrp) { $usersGrp = "Usuarios" }
+    $usersMem = Get-LocalGroupMember -Group $usersGrp -EA SilentlyContinue | Select-Object -ExpandProperty Name
+    if ($usersMem -contains "$env:COMPUTERNAME\admin" -or $usersMem -contains "admin") {
+        Remove-LocalGroupMember -Group $usersGrp -Member "admin" -EA SilentlyContinue
+    }
+    return $grp
+}
+
+function Test-ComputerName {
+    param([string]$Name)
+    if ($Name.Length -gt 15) { return "Nome excede 15 caracteres (tem $($Name.Length))." }
+    if ($Name.Length -lt 1) { return "Nome nao pode ser vazio." }
+    if ($Name -match '[\\/:*?"<>|\s]') { return "Nome contem caracteres invalidos (espacos ou \\/:*?`"<>|)." }
+    if ($Name -match '^\d+$') { return "Nome nao pode ser composto apenas por numeros." }
+    return $null
+}
+
 # GUI de padronizacao
 function Show-PadronizacaoGUI {
     Add-Type -AssemblyName System.Windows.Forms
@@ -332,6 +366,8 @@ function Show-PadronizacaoGUI {
     & $mkHeader "COMPUTADOR" 245
     $btnRename   = & $mkBtn "Renomear PC"         262
     $btnDominio  = & $mkBtn "Ingresso Dominio"    287
+
+    $botoesLaterais = @($btnInfoPC, $btnChave, $btnAtivar, $btnAssist, $btnTestar, $btnRDP, $btnFuso, $btnAdmin, $btnRename, $btnDominio)
 
     $btnSair = New-Object System.Windows.Forms.Button
     $btnSair.Text = "SAIR"
@@ -774,28 +810,7 @@ function Show-PadronizacaoGUI {
     $btnAdmin.Add_Click({
         & $sepLog "CRIAR CONTA ADMIN"
         try {
-            if (-not (Get-LocalUser -Name "admin" -EA SilentlyContinue)) {
-                try {
-                    New-LocalUser -Name "admin" -NoPassword -Description "Conta criada via GUI" -PasswordNeverExpires $true -EA Stop
-                } catch {
-                    $r = net user admin "" /add /y 2>&1
-                    if ($LASTEXITCODE -ne 0) { throw "net user falhou: $r" }
-                }
-            }
-            Set-LocalUser -Name "admin" -PasswordNeverExpires $true -EA SilentlyContinue
-            $grp = (Get-LocalGroup | Where-Object { $_.SID -match "S-1-5-32-544" }).Name
-            if (-not $grp) { $grp = "Administradores" }
-            $mem = Get-LocalGroupMember -Group $grp | Select-Object -ExpandProperty Name
-            if ($mem -notcontains "$env:COMPUTERNAME\admin" -and $mem -notcontains "admin") {
-                Add-LocalGroupMember -Group $grp -Member "admin" -EA Stop
-            }
-            # Remover do grupo Usuarios (adicionado automaticamente pelo Windows ao criar o usuario)
-            $usersGrp = (Get-LocalGroup | Where-Object { $_.SID -match "S-1-5-32-545" }).Name
-            if (-not $usersGrp) { $usersGrp = "Usuarios" }
-            $usersMem = Get-LocalGroupMember -Group $usersGrp -EA SilentlyContinue | Select-Object -ExpandProperty Name
-            if ($usersMem -contains "$env:COMPUTERNAME\admin" -or $usersMem -contains "admin") {
-                Remove-LocalGroupMember -Group $usersGrp -Member "admin" -EA SilentlyContinue
-            }
+            $grp = Set-AdminAccount
             & $log "  [OK] Conta admin configurada no grupo '$grp'." $corOk
         } catch { & $log "  [ERRO] $($_.Exception.Message)" $corErro }
     })
@@ -842,12 +857,18 @@ function Show-PadronizacaoGUI {
         if ($dlg.ShowDialog($form) -eq "OK") {
             $novoNome = $tb.Text.Trim()
             if ($novoNome) {
-                & $sepLog "RENOMEAR COMPUTADOR"
-                try {
-                    Rename-Computer -NewName $novoNome -Force -EA Stop
-                    $script:guiNeedsRestart = $true
-                    & $log "  [OK] Renomeado para '$novoNome'. Reinicio necessario." $corOk
-                } catch { & $log "  [ERRO] $($_.Exception.Message)" $corErro }
+                $erroNome = Test-ComputerName -Name $novoNome
+                if ($erroNome) {
+                    & $sepLog "RENOMEAR COMPUTADOR"
+                    & $log "  [ERRO] $erroNome" $corErro
+                } else {
+                    & $sepLog "RENOMEAR COMPUTADOR"
+                    try {
+                        Rename-Computer -NewName $novoNome -Force -EA Stop
+                        $script:guiNeedsRestart = $true
+                        & $log "  [OK] Renomeado para '$novoNome'. Reinicio necessario." $corOk
+                    } catch { & $log "  [ERRO] $($_.Exception.Message)" $corErro }
+                }
             }
         }
     })
@@ -927,6 +948,7 @@ function Show-PadronizacaoGUI {
 
         $btnIniciar.Enabled = $false
         $btnIniciar.Text = "EXECUTANDO..."
+        $botoesLaterais | ForEach-Object { $_.Enabled = $false }
 
         & $log "" $corInfo
         & $log "  ================================================" $corDestaque
@@ -962,12 +984,18 @@ function Show-PadronizacaoGUI {
 
         # Etapa 4 - Nome do computador
         if ($txtNome.Text.Trim() -ne "") {
-            & $log "  [4] Renomeando para '$($txtNome.Text.Trim())'..." $corInfo
-            try {
-                Rename-Computer -NewName $txtNome.Text.Trim() -Force -EA Stop
-                $script:guiNeedsRestart = $true
-                & $log "      [OK] Renomeado. Reinicializacao necessaria." $corOk
-            } catch { & $log "      [ERRO] $($_.Exception.Message)" $corErro }
+            $nomePC = $txtNome.Text.Trim()
+            $erroNome = Test-ComputerName -Name $nomePC
+            if ($erroNome) {
+                & $log "  [4] $erroNome" $corErro
+            } else {
+                & $log "  [4] Renomeando para '$nomePC'..." $corInfo
+                try {
+                    Rename-Computer -NewName $nomePC -Force -EA Stop
+                    $script:guiNeedsRestart = $true
+                    & $log "      [OK] Renomeado. Reinicializacao necessaria." $corOk
+                } catch { & $log "      [ERRO] $($_.Exception.Message)" $corErro }
+            }
         }
 
         # Etapa 5 - Dominio
@@ -993,21 +1021,7 @@ function Show-PadronizacaoGUI {
         if ($cbEtapas["admin"].Checked) {
             & $log "  [6] Criando conta admin..." $corInfo
             try {
-                if (-not (Get-LocalUser -Name "admin" -EA SilentlyContinue)) {
-                    try {
-                        New-LocalUser -Name "admin" -NoPassword -Description "Conta criada via GUI" -PasswordNeverExpires $true -EA Stop
-                    } catch {
-                        $r = net user admin "" /add /y 2>&1
-                        if ($LASTEXITCODE -ne 0) { throw "net user falhou: $r" }
-                    }
-                }
-                Set-LocalUser -Name "admin" -PasswordNeverExpires $true -EA SilentlyContinue
-                $grp = (Get-LocalGroup | Where-Object { $_.SID -match "S-1-5-32-544" }).Name
-                if (-not $grp) { $grp = "Administradores" }
-                $mem = Get-LocalGroupMember -Group $grp | Select-Object -ExpandProperty Name
-                if ($mem -notcontains "$env:COMPUTERNAME\admin" -and $mem -notcontains "admin") {
-                    Add-LocalGroupMember -Group $grp -Member "admin" -EA Stop
-                }
+                $grp = Set-AdminAccount
                 & $log "      [OK] Conta admin configurada no grupo '$grp'." $corOk
             } catch { & $log "      [ERRO] $($_.Exception.Message)" $corErro }
         }
@@ -1174,6 +1188,7 @@ function Show-PadronizacaoGUI {
         $btnIniciar.Text = "CONCLUIDO -- Clique para fechar"
         $btnIniciar.BackColor = [System.Drawing.Color]::FromArgb(0, 110, 0)
         $btnIniciar.Enabled = $true
+        $botoesLaterais | ForEach-Object { $_.Enabled = $true }
 
         if ($script:guiNeedsRestart) {
             $resposta = [System.Windows.Forms.MessageBox]::Show(
