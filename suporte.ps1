@@ -1219,9 +1219,8 @@ function Show-PadronizacaoGUI {
 
         & $log "" $corInfo
         & $log "  ================================================" $corAviso
-        & $log "  ATENCAO -- ETAPAS MANUAIS RESTANTES:" $corAviso
-        & $log "  [1] Kaspersky: \\balbina\suporte\Kasper ok\" $corAviso
-        & $log "  [2] Senha admin: colocar de acordo com a Zona" $corAviso
+        & $log "  ATENCAO -- ETAPA MANUAL RESTANTE:" $corAviso
+        & $log "  [1] Senha admin: colocar de acordo com a Zona" $corAviso
         & $log "  ================================================" $corAviso
 
         $script:guiConcluido = $true
