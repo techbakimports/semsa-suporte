@@ -1045,10 +1045,22 @@ function Show-PadronizacaoGUI {
                     }
                 }
                 if ($script:standalonePath -and (Test-Path $script:standalonePath)) {
+                    $certs = Get-ChildItem -Path $script:standalonePath -File | Where-Object { $_.Extension -in '.cer','.crt','.pem' }
+                    if ($certs.Count -gt 0) {
+                        & $log "      $($certs.Count) certificado(s) encontrado(s) — instalando em Raiz Confiavel (LocalMachine)..." $corInfo
+                        foreach ($certFile in $certs) {
+                            try {
+                                Import-Certificate -FilePath $certFile.FullName -CertStoreLocation Cert:\LocalMachine\Root | Out-Null
+                                & $log "      [OK] Certificado: $($certFile.Name)" $corOk
+                            } catch {
+                                & $log "      [ERRO] Certificado $($certFile.Name): $($_.Exception.Message)" $corErro
+                            }
+                        }
+                    }
                     $instaladores = Get-ChildItem -Path $script:standalonePath -Filter "*.exe" -File | Sort-Object Name
-                    if ($instaladores.Count -eq 0) {
-                        & $log "      [ERRO] Nenhum .exe encontrado em: $($script:standalonePath)" $corErro
-                    } else {
+                    if ($instaladores.Count -eq 0 -and $certs.Count -eq 0) {
+                        & $log "      [ERRO] Nenhum .exe ou certificado encontrado em: $($script:standalonePath)" $corErro
+                    } elseif ($instaladores.Count -gt 0) {
                         & $log "      Pasta: $($script:standalonePath)" $corTexto
                         & $log "      $($instaladores.Count) instalador(es) encontrado(s)" $corTexto
                         $progressBar.Maximum = $instaladores.Count
@@ -1059,11 +1071,16 @@ function Show-PadronizacaoGUI {
                             & $log "      [$idxSt/$($instaladores.Count)] Executando $($inst.Name)..." $corInfo
                             [System.Windows.Forms.Application]::DoEvents()
                             try {
-                                $proc = Start-Process -FilePath $inst.FullName -PassThru -Wait
-                                if ($proc.ExitCode -eq 0) {
-                                    & $log "      [OK] $($inst.Name)" $corOk
+                                $proc = Start-Process -FilePath $inst.FullName -PassThru
+                                $terminou = $proc.WaitForExit(600000)
+                                if ($terminou) {
+                                    if ($proc.ExitCode -eq 0) {
+                                        & $log "      [OK] $($inst.Name)" $corOk
+                                    } else {
+                                        & $log "      [AVISO] $($inst.Name) (cod: $($proc.ExitCode))" $corAviso
+                                    }
                                 } else {
-                                    & $log "      [AVISO] $($inst.Name) (cod: $($proc.ExitCode))" $corAviso
+                                    & $log "      [AVISO] $($inst.Name) excedeu 10min — seguindo para o proximo..." $corAviso
                                 }
                             } catch {
                                 & $log "      [ERRO] $($inst.Name): $($_.Exception.Message)" $corErro
@@ -1176,12 +1193,35 @@ function Show-PadronizacaoGUI {
             }
         }
 
+        if ($script:standalonePath) {
+            $vncIni = Join-Path $script:standalonePath "ultravnc.ini"
+            if (Test-Path $vncIni) {
+                & $log "" $corInfo
+                & $log "  [POS] Configurando UltraVNC..." $corInfo
+                $vncDir = @("${env:ProgramFiles}\uvnc bvba\UltraVNC",
+                            "${env:ProgramFiles(x86)}\uvnc bvba\UltraVNC") |
+                          Where-Object { Test-Path $_ } | Select-Object -First 1
+                if ($vncDir) {
+                    try {
+                        Stop-Service uvnc_service -Force -EA SilentlyContinue
+                        Start-Sleep -Seconds 2
+                        Copy-Item $vncIni "$vncDir\ultravnc.ini" -Force
+                        Start-Service uvnc_service -EA SilentlyContinue
+                        & $log "      [OK] ultravnc.ini aplicado e servico reiniciado." $corOk
+                    } catch {
+                        & $log "      [ERRO] UltraVNC config: $($_.Exception.Message)" $corErro
+                    }
+                } else {
+                    & $log "      [AVISO] Pasta do UltraVNC nao encontrada — ini nao aplicado." $corAviso
+                }
+            }
+        }
+
         & $log "" $corInfo
         & $log "  ================================================" $corAviso
         & $log "  ATENCAO -- ETAPAS MANUAIS RESTANTES:" $corAviso
-        & $log "  [1] Certificado Fortinet: certmgr.msc" $corAviso
-        & $log "  [2] Kaspersky: \\balbina\suporte\Kasper ok\" $corAviso
-        & $log "  [3] Senha admin: colocar de acordo com a Zona" $corAviso
+        & $log "  [1] Kaspersky: \\balbina\suporte\Kasper ok\" $corAviso
+        & $log "  [2] Senha admin: colocar de acordo com a Zona" $corAviso
         & $log "  ================================================" $corAviso
 
         $script:guiConcluido = $true
