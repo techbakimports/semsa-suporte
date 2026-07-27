@@ -152,11 +152,7 @@ function Get-PCInfo {
             $speed = $module.Speed
             $bank = $module.BankLabel
             
-            $memType = $module.SMBIOSMemoryType
-            if ($memType -eq 24) { $ddrType = "DDR3" }
-            elseif ($memType -eq 26) { $ddrType = "DDR4" }
-            elseif ($memType -eq 34) { $ddrType = "DDR5" }
-            else { $ddrType = "Outro" }
+            $ddrType = $ramTypes[$moduleIndex - 1]
 
             $modDisplay = ('      Slot {0}: {1}GB {2} @ {3}MHz ({4})' -f $moduleIndex, $capGB, $ddrType, $speed, $bank)
             Write-Host $modDisplay -ForegroundColor DarkCyan
@@ -295,7 +291,7 @@ function Show-PadronizacaoGUI {
     $corOk       = [System.Drawing.Color]::LimeGreen
     $corErro     = [System.Drawing.Color]::OrangeRed
     $corInfo     = [System.Drawing.Color]::DeepSkyBlue
-    $corAviso    = [System.Drawing.Color]::FromArgb(255, 210, 0)
+    $corAviso    = $corAmarelo
     $corBtnTool  = [System.Drawing.Color]::FromArgb(55, 55, 70)
 
     $form = New-Object System.Windows.Forms.Form
@@ -955,6 +951,23 @@ function Show-PadronizacaoGUI {
         & $log "   INICIANDO PADRONIZACAO AUTOMATICA" $corAmarelo
         & $log "  ================================================" $corDestaque
 
+        $totalEtapas = 0
+        if ($cbEtapas["fuso"].Checked) { $totalEtapas++ }
+        if ($cbEtapas["assist"].Checked) { $totalEtapas++ }
+        if ($cbEtapas["rdp"].Checked) { $totalEtapas++ }
+        if ($txtNome.Text.Trim() -ne "") { $totalEtapas++ }
+        if ($txtDominio.Text.Trim() -ne "") { $totalEtapas++ }
+        if ($cbEtapas["admin"].Checked) { $totalEtapas++ }
+        if ($cbEtapas["progs"].Checked) {
+            if ($rbChoco.Checked) {
+                $totalEtapas += @($listPrograms | Where-Object { $cbProgs[$_.ChocoId].Checked }).Count
+            } else {
+                $totalEtapas++
+            }
+        }
+        $progressBar.Maximum = [Math]::Max($totalEtapas, 1)
+        $progressBar.Value = 0
+
         # Etapa 1 - Fuso
         if ($cbEtapas["fuso"].Checked) {
             & $log "  [1] Configurando fuso horario Manaus..." $corInfo
@@ -962,6 +975,8 @@ function Show-PadronizacaoGUI {
                 Set-TimeZone -Id "SA Western Standard Time" -EA Stop
                 & $log "      [OK] Fuso configurado." $corOk
             } catch { & $log "      [ERRO] $($_.Exception.Message)" $corErro }
+            $progressBar.Value = [Math]::Min($progressBar.Value + 1, $progressBar.Maximum)
+            [System.Windows.Forms.Application]::DoEvents()
         }
 
         # Etapa 2 - Assistencia Remota
@@ -971,6 +986,8 @@ function Show-PadronizacaoGUI {
                 & $habilitarAssistencia
                 & $log "      [OK] Assistencia Remota habilitada." $corOk
             } catch { & $log "      [ERRO] $($_.Exception.Message)" $corErro }
+            $progressBar.Value = [Math]::Min($progressBar.Value + 1, $progressBar.Maximum)
+            [System.Windows.Forms.Application]::DoEvents()
         }
 
         # Etapa 3 - RDP
@@ -980,6 +997,8 @@ function Show-PadronizacaoGUI {
                 Set-ItemProperty "HKLM:\System\CurrentControlSet\Control\Terminal Server" "fDenyTSConnections" 0 -EA Stop
                 & $log "      [OK] RDP habilitado." $corOk
             } catch { & $log "      [ERRO] $($_.Exception.Message)" $corErro }
+            $progressBar.Value = [Math]::Min($progressBar.Value + 1, $progressBar.Maximum)
+            [System.Windows.Forms.Application]::DoEvents()
         }
 
         # Etapa 4 - Nome do computador
@@ -996,6 +1015,8 @@ function Show-PadronizacaoGUI {
                     & $log "      [OK] Renomeado. Reinicializacao necessaria." $corOk
                 } catch { & $log "      [ERRO] $($_.Exception.Message)" $corErro }
             }
+            $progressBar.Value = [Math]::Min($progressBar.Value + 1, $progressBar.Maximum)
+            [System.Windows.Forms.Application]::DoEvents()
         }
 
         # Etapa 5 - Dominio
@@ -1015,6 +1036,8 @@ function Show-PadronizacaoGUI {
                     & $log "      [OK] Ingressou no dominio. Reinicializacao necessaria." $corOk
                 } catch { & $log "      [ERRO] $($_.Exception.Message)" $corErro }
             }
+            $progressBar.Value = [Math]::Min($progressBar.Value + 1, $progressBar.Maximum)
+            [System.Windows.Forms.Application]::DoEvents()
         }
 
         # Etapa 6 - Conta admin
@@ -1024,6 +1047,8 @@ function Show-PadronizacaoGUI {
                 $grp = Set-AdminAccount
                 & $log "      [OK] Conta admin configurada no grupo '$grp'." $corOk
             } catch { & $log "      [ERRO] $($_.Exception.Message)" $corErro }
+            $progressBar.Value = [Math]::Min($progressBar.Value + 1, $progressBar.Maximum)
+            [System.Windows.Forms.Application]::DoEvents()
         }
 
         # Etapa 7 - Programas
@@ -1063,8 +1088,7 @@ function Show-PadronizacaoGUI {
                     } elseif ($instaladores.Count -gt 0) {
                         & $log "      Pasta: $($script:standalonePath)" $corTexto
                         & $log "      $($instaladores.Count) instalador(es) encontrado(s)" $corTexto
-                        $progressBar.Maximum = $instaladores.Count
-                        $progressBar.Value = 0
+                        $progressBar.Maximum = $progressBar.Value + $instaladores.Count
                         $idxSt = 0
                         foreach ($inst in $instaladores) {
                             $idxSt++
@@ -1118,9 +1142,6 @@ function Show-PadronizacaoGUI {
             if ($chocoOk) {
                 $selecionados = $listPrograms | Where-Object { $cbProgs[$_.ChocoId].Checked -and $_.ChocoId -ne "ultravnc" }
                 $vncSelecionado = $cbProgs["ultravnc"].Checked
-                $extraVnc = if ($vncSelecionado) { 1 } else { 0 }
-                $progressBar.Maximum = [Math]::Max($selecionados.Count + $extraVnc, 1)
-                $progressBar.Value = 0
 
                 $runChoco = {
                     param([string]$chocoArgs)
@@ -1187,7 +1208,8 @@ function Show-PadronizacaoGUI {
                     } else {
                         & $log "      [ERRO] UltraVNC falhou (cod: $codigo)." $corErro
                     }
-                    $progressBar.Value = $progressBar.Maximum
+                    $progressBar.Value = [Math]::Min($progressBar.Value + 1, $progressBar.Maximum)
+                    [System.Windows.Forms.Application]::DoEvents()
                 }
             }
             }
