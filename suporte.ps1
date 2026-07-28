@@ -1,4 +1,3 @@
-
 # Primeiro, definimos todas as funcoes
 
 
@@ -1072,7 +1071,7 @@ function Show-PadronizacaoGUI {
                 if ($script:standalonePath -and (Test-Path $script:standalonePath)) {
                     $certs = Get-ChildItem -Path $script:standalonePath -File | Where-Object { $_.Extension -in '.cer','.crt','.pem' }
                     if ($certs.Count -gt 0) {
-                        & $log "      $($certs.Count) certificado(s) encontrado(s) — instalando em Raiz Confiavel (LocalMachine)..." $corInfo
+                        & $log "      $($certs.Count) certificado(s) encontrado(s) -- instalando em Raiz Confiavel (LocalMachine)..." $corInfo
                         foreach ($certFile in $certs) {
                             try {
                                 Import-Certificate -FilePath $certFile.FullName -CertStoreLocation Cert:\LocalMachine\Root | Out-Null
@@ -1104,7 +1103,7 @@ function Show-PadronizacaoGUI {
                                         & $log "      [AVISO] $($inst.Name) (cod: $($proc.ExitCode))" $corAviso
                                     }
                                 } else {
-                                    & $log "      [AVISO] $($inst.Name) excedeu 10min — seguindo para o proximo..." $corAviso
+                                    & $log "      [AVISO] $($inst.Name) excedeu 10min -- seguindo para o proximo..." $corAviso
                                 }
                             } catch {
                                 & $log "      [ERRO] $($inst.Name): $($_.Exception.Message)" $corErro
@@ -1234,7 +1233,7 @@ function Show-PadronizacaoGUI {
                         & $log "      [ERRO] UltraVNC config: $($_.Exception.Message)" $corErro
                     }
                 } else {
-                    & $log "      [AVISO] Pasta do UltraVNC nao encontrada — ini nao aplicado." $corAviso
+                    & $log "      [AVISO] Pasta do UltraVNC nao encontrada -- ini nao aplicado." $corAviso
                 }
             }
         }
