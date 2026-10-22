@@ -306,6 +306,151 @@ function Get-OfficeStatus {
     return [PSCustomObject]@{ Instalacao = @($instalacao); Licencas = @($itens); Contas = @($contas) }
 }
 
+function Get-PadronizacaoStatus {
+    param(
+        [string]$NomeEsperado = "",
+        [string]$DominioEsperado = "",
+        [object[]]$Programas = @(),
+        [string]$CertPath = "",
+        [bool]$CertIsDir = $false
+    )
+    $res = New-Object System.Collections.ArrayList
+    $add = {
+        param([string]$etapa, [string]$item, [string]$estado, [string]$detalhe)
+        [void]$res.Add([PSCustomObject]@{ Etapa = $etapa; Item = $item; Estado = $estado; Detalhe = $detalhe })
+    }
+    $fwRdp = "@FirewallAPI.dll,-28752"
+
+    # 1 - Fuso horario
+    $e = "1. Fuso horario"
+    try {
+        [System.TimeZoneInfo]::ClearCachedData()
+        $tz = [System.TimeZoneInfo]::Local
+        if ($tz.Id -eq "SA Western Standard Time") { & $add $e "Fuso Manaus (UTC-04:00)" "OK" "" }
+        else { & $add $e "Fuso Manaus (UTC-04:00)" "FALTA" "atual: $($tz.Id)" }
+    } catch { & $add $e "Fuso Manaus (UTC-04:00)" "AVISO" $_.Exception.Message }
+
+    # 2 - Assistencia Remota
+    $e = "2. Assistencia Remota"
+    $raReg = (Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\Remote Assistance" -EA SilentlyContinue).fAllowToGetHelp
+    $raPol = (Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" -EA SilentlyContinue).fAllowToGetHelp
+    if ($raReg -eq 1 -and $raPol -ne 0) { & $add $e "Permitida no registro" "OK" "" }
+    elseif ($raPol -eq 0) { & $add $e "Permitida no registro" "FALTA" "bloqueada por politica (fAllowToGetHelp=0)" }
+    else { & $add $e "Permitida no registro" "FALTA" "fAllowToGetHelp nao esta em 1" }
+    try {
+        $regrasRa = @(Get-NetFirewallRule -EA Stop | Where-Object { $_.Name -like "RemoteAssistance*" })
+        if ($regrasRa.Count -eq 0) { & $add $e "Firewall" "INFO" "este Windows nao tem regras de Assistencia Remota" }
+        elseif (@($regrasRa | Where-Object { $_.Enabled -eq "True" }).Count -gt 0) { & $add $e "Firewall" "OK" "" }
+        else { & $add $e "Firewall" "FALTA" "regras de Assistencia Remota desabilitadas" }
+    } catch { & $add $e "Firewall" "AVISO" "nao foi possivel consultar o firewall" }
+    $parados = @()
+    foreach ($sn in @("TermService", "SessionEnv", "UmRdpService", "RemoteRegistry")) {
+        $s = Get-Service -Name $sn -EA SilentlyContinue
+        if ($s -and $s.Status -ne "Running") { $parados += $sn }
+    }
+    if ($parados.Count -eq 0) { & $add $e "Servicos (TermService, SessionEnv, UmRdpService, RemoteRegistry)" "OK" "" }
+    else { & $add $e "Servicos" "FALTA" "parados: $($parados -join ', ')" }
+
+    # 3 - RDP
+    $e = "3. RDP"
+    $deny = (Get-ItemProperty "HKLM:\System\CurrentControlSet\Control\Terminal Server" -EA SilentlyContinue).fDenyTSConnections
+    if ($deny -eq 0) { & $add $e "RDP habilitado no registro" "OK" "" }
+    else { & $add $e "RDP habilitado no registro" "FALTA" "fDenyTSConnections = $deny" }
+    try {
+        $regrasRdp = @(Get-NetFirewallRule -Group $fwRdp -EA Stop)
+        if (@($regrasRdp | Where-Object { $_.Enabled -eq "True" }).Count -gt 0) { & $add $e "Firewall do RDP" "OK" "" }
+        else { & $add $e "Firewall do RDP" "FALTA" "regras do grupo Area de Trabalho Remota desabilitadas" }
+    } catch { & $add $e "Firewall do RDP" "AVISO" "nao foi possivel consultar o firewall" }
+    try {
+        $escuta = @(Get-NetTCPConnection -LocalPort 3389 -State Listen -EA Stop)
+        if ($escuta.Count -gt 0) { & $add $e "Porta 3389 escutando" "OK" "" }
+        else { & $add $e "Porta 3389 escutando" "FALTA" "nenhum servico escutando (TermService parado?)" }
+    } catch { & $add $e "Porta 3389 escutando" "AVISO" "nao foi possivel consultar as portas" }
+
+    # 4 - Nome do computador
+    $e = "4. Nome do computador"
+    if ($NomeEsperado) {
+        if ($env:COMPUTERNAME -ieq $NomeEsperado) { & $add $e "Nome = $NomeEsperado" "OK" "" }
+        else { & $add $e "Nome = $NomeEsperado" "FALTA" "atual: $env:COMPUTERNAME" }
+    } else { & $add $e "Nome atual" "INFO" $env:COMPUTERNAME }
+
+    # 5 - Dominio
+    $e = "5. Dominio"
+    $cs = Get-CimInstance Win32_ComputerSystem -EA SilentlyContinue
+    if ($DominioEsperado) {
+        $dom = "$($cs.Domain)"
+        $ok = $cs.PartOfDomain -and ($dom -ieq $DominioEsperado -or $dom -like "$DominioEsperado.*" -or $DominioEsperado -like "$dom.*")
+        if ($ok) { & $add $e "Ingressado em $DominioEsperado" "OK" "" }
+        else { & $add $e "Ingressado em $DominioEsperado" "FALTA" "atual: $dom" }
+    } elseif ($cs) {
+        $atual = if ($cs.PartOfDomain) { "dominio $($cs.Domain)" } else { "grupo de trabalho $($cs.Domain)" }
+        & $add $e "Situacao atual" "INFO" $atual
+    }
+
+    # 6 - Conta admin
+    $e = "6. Conta admin"
+    $adm = Get-LocalUser -Name "admin" -EA SilentlyContinue
+    if (-not $adm) {
+        & $add $e "Conta 'admin' existe" "FALTA" ""
+    } else {
+        & $add $e "Conta 'admin' existe" "OK" $(if ($adm.Enabled) { "habilitada" } else { "desabilitada" })
+        if (-not $adm.Enabled) { & $add $e "Conta 'admin' habilitada" "FALTA" "conta desabilitada" }
+        $grpAdm = (Get-LocalGroup | Where-Object { $_.SID -match "S-1-5-32-544" }).Name
+        $grpUsr = (Get-LocalGroup | Where-Object { $_.SID -match "S-1-5-32-545" }).Name
+        $memAdm = @(Get-LocalGroupMember -Group $grpAdm -EA SilentlyContinue | Select-Object -ExpandProperty Name)
+        $memUsr = @(Get-LocalGroupMember -Group $grpUsr -EA SilentlyContinue | Select-Object -ExpandProperty Name)
+        if ($memAdm -contains "$env:COMPUTERNAME\admin" -or $memAdm -contains "admin") { & $add $e "No grupo Administradores" "OK" "" }
+        else { & $add $e "No grupo Administradores" "FALTA" "" }
+        if ($memUsr -contains "$env:COMPUTERNAME\admin" -or $memUsr -contains "admin") { & $add $e "Fora do grupo Usuarios" "FALTA" "" }
+        else { & $add $e "Fora do grupo Usuarios" "OK" "" }
+        if ($adm.PasswordLastSet) { & $add $e "Senha da Zona definida" "OK" "definida em $($adm.PasswordLastSet.ToString('dd/MM/yyyy'))" }
+        else { & $add $e "Senha da Zona definida" "FALTA" "conta ainda sem senha (etapa manual)" }
+    }
+
+    # 7 - Programas
+    $e = "7. Programas"
+    $uninst = @(Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*",
+                                 "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*",
+                                 "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*" -EA SilentlyContinue |
+                Where-Object { $_.DisplayName })
+    foreach ($p in $Programas) {
+        $m = $uninst | Where-Object { $_.DisplayName -match $p.Pattern } | Select-Object -First 1
+        if ($m) { & $add $e $p.Name "OK" (("$($m.DisplayName) $($m.DisplayVersion)").Trim()) }
+        else { & $add $e $p.Name "FALTA" "nao instalado" }
+    }
+    $svc = Get-Service -Name "uvnc_service" -EA SilentlyContinue
+    if ($svc) {
+        if ($svc.Status -eq "Running") {
+            & $add $e "UltraVNC: servico rodando" "OK" ""
+            try {
+                $pids = @(Get-Process -Name "winvnc" -EA SilentlyContinue | Select-Object -ExpandProperty Id)
+                $portas = @(Get-NetTCPConnection -State Listen -EA Stop | Where-Object { $pids -contains $_.OwningProcess } |
+                            Select-Object -ExpandProperty LocalPort -Unique | Sort-Object)
+                if ($portas -contains 8888) { & $add $e "UltraVNC: porta 8888" "OK" "" }
+                elseif ($portas.Count -gt 0) { & $add $e "UltraVNC: porta 8888" "AVISO" "escutando em: $($portas -join ', ')" }
+                else { & $add $e "UltraVNC: porta 8888" "AVISO" "nenhuma porta encontrada" }
+            } catch { & $add $e "UltraVNC: porta 8888" "AVISO" "nao foi possivel consultar as portas" }
+        } else { & $add $e "UltraVNC: servico rodando" "FALTA" "servico $($svc.Status)" }
+    } elseif ($uninst | Where-Object { $_.DisplayName -match "UltraVNC" }) {
+        & $add $e "UltraVNC: servico rodando" "FALTA" "instalado, mas sem o servico uvnc_service"
+    }
+
+    # 8 - Certificado
+    $e = "8. Certificado"
+    if ($CertPath -and (Test-Path $CertPath)) {
+        $arqs = if ($CertIsDir) { @(Get-ChildItem -Path $CertPath -File | Where-Object { $_.Extension -in ".cer", ".crt" }) } else { @(Get-Item -Path $CertPath) }
+        foreach ($a in $arqs) {
+            try {
+                $x = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2($a.FullName)
+                if (Test-Path "Cert:\LocalMachine\Root\$($x.Thumbprint)") { & $add $e $a.Name "OK" $x.Subject }
+                else { & $add $e $a.Name "FALTA" "nao esta em Raiz Confiavel (maquina)" }
+            } catch { & $add $e $a.Name "AVISO" "arquivo nao e um certificado valido" }
+        }
+    } else { & $add $e "Certificado" "INFO" "nenhum arquivo/pasta selecionado na GUI" }
+
+    return @($res)
+}
+
 function Set-AdminAccount {
     # Decisao do mantenedor: conta sem senha de proposito; o tecnico define a senha da zona depois.
     if (-not (Get-LocalUser -Name "admin" -EA SilentlyContinue)) {
@@ -599,15 +744,15 @@ function Show-PadronizacaoGUI {
     $panelProgs.Controls.Add($rbWinget)
 
     $listPrograms = @(
-        @{ ChocoId = "Temurin8jre";       WingetId = "EclipseAdoptium.Temurin.8.JRE";      Name = "Java (JRE)";     Extra = "" },
-        @{ ChocoId = "winrar";            WingetId = "RARLab.WinRAR";                      Name = "WinRAR";          Extra = "" },
-        @{ ChocoId = "vlc";               WingetId = "VideoLAN.VLC";                       Name = "VLC";             Extra = "" },
-        @{ ChocoId = "FoxitReader";       WingetId = "Foxit.FoxitReader";                  Name = "Foxit Reader";    Extra = "" },
-        @{ ChocoId = "pdf24";             WingetId = "geeksoftwareGmbH.PDF24Creator";      Name = "PDF24";           Extra = "" },
-        @{ ChocoId = "libreoffice-still"; WingetId = "TheDocumentFoundation.LibreOffice";  Name = "LibreOffice";     Extra = "" },
-        @{ ChocoId = "GoogleChrome";      WingetId = "Google.Chrome";                      Name = "Google Chrome";   Extra = "--ignore-checksums" },
-        @{ ChocoId = "Firefox";           WingetId = "Mozilla.Firefox.pt-BR";              Name = "Firefox";         Extra = "" },
-        @{ ChocoId = "ultravnc";          WingetId = "uvncbvba.UltraVNC";                  Name = "UltraVNC (GUI)";  Extra = "" }
+        @{ ChocoId = "Temurin8jre";       WingetId = "EclipseAdoptium.Temurin.8.JRE";      Name = "Java (JRE)";     Extra = ""; Pattern = "Temurin|^Java( |\()" },
+        @{ ChocoId = "winrar";            WingetId = "RARLab.WinRAR";                      Name = "WinRAR";          Extra = ""; Pattern = "^WinRAR" },
+        @{ ChocoId = "vlc";               WingetId = "VideoLAN.VLC";                       Name = "VLC";             Extra = ""; Pattern = "VLC media player" },
+        @{ ChocoId = "FoxitReader";       WingetId = "Foxit.FoxitReader";                  Name = "Foxit Reader";    Extra = ""; Pattern = "Foxit" },
+        @{ ChocoId = "pdf24";             WingetId = "geeksoftwareGmbH.PDF24Creator";      Name = "PDF24";           Extra = ""; Pattern = "PDF24" },
+        @{ ChocoId = "libreoffice-still"; WingetId = "TheDocumentFoundation.LibreOffice";  Name = "LibreOffice";     Extra = ""; Pattern = "LibreOffice" },
+        @{ ChocoId = "GoogleChrome";      WingetId = "Google.Chrome";                      Name = "Google Chrome";   Extra = "--ignore-checksums"; Pattern = "^Google Chrome" },
+        @{ ChocoId = "Firefox";           WingetId = "Mozilla.Firefox.pt-BR";              Name = "Firefox";         Extra = ""; Pattern = "Mozilla Firefox" },
+        @{ ChocoId = "ultravnc";          WingetId = "uvncbvba.UltraVNC";                  Name = "UltraVNC (GUI)";  Extra = ""; Pattern = "UltraVNC" }
     )
 
     $cbProgs = @{}
@@ -793,9 +938,21 @@ function Show-PadronizacaoGUI {
     $btnIniciar.ForeColor = $corTexto
     $btnIniciar.FlatStyle = "Flat"
     $btnIniciar.FlatAppearance.BorderSize = 0
-    $btnIniciar.Size = New-Object System.Drawing.Size(712, 40)
+    $btnIniciar.Size = New-Object System.Drawing.Size(352, 40)
     $btnIniciar.Location = New-Object System.Drawing.Point(208, 407)
     $form.Controls.Add($btnIniciar)
+
+    $btnVerificar = New-Object System.Windows.Forms.Button
+    $btnVerificar.Text = "VERIFICAR PADRONIZACAO"
+    $btnVerificar.Font = New-Object System.Drawing.Font("Consolas", 11, [System.Drawing.FontStyle]::Bold)
+    $btnVerificar.BackColor = [System.Drawing.Color]::FromArgb(40, 110, 100)
+    $btnVerificar.ForeColor = $corTexto
+    $btnVerificar.FlatStyle = "Flat"
+    $btnVerificar.FlatAppearance.BorderSize = 0
+    $btnVerificar.Size = New-Object System.Drawing.Size(354, 40)
+    $btnVerificar.Location = New-Object System.Drawing.Point(566, 407)
+    $form.Controls.Add($btnVerificar)
+    $botoesLaterais = @($botoesLaterais) + $btnVerificar
 
     $progressBar = New-Object System.Windows.Forms.ProgressBar
     $progressBar.Location = New-Object System.Drawing.Point(208, 452)
@@ -860,8 +1017,8 @@ function Show-PadronizacaoGUI {
         Remove-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" "fAllowToGetHelp" -EA SilentlyContinue
         Set-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" "fAllowToGetHelp" 1 -EA SilentlyContinue
         Set-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\Remote Assistance" "fAllowToGetHelp" 1 -EA SilentlyContinue
-        Enable-NetFirewallRule -DisplayGroup "Remote Desktop" -EA SilentlyContinue
-        Enable-NetFirewallRule -DisplayGroup "Remote Assistance" -EA SilentlyContinue
+        Enable-NetFirewallRule -Group "@FirewallAPI.dll,-28752" -EA SilentlyContinue
+        Get-NetFirewallRule -EA SilentlyContinue | Where-Object { $_.Name -like "RemoteAssistance*" } | Enable-NetFirewallRule -EA SilentlyContinue
         foreach ($sn in @("TermService","SessionEnv","UmRdpService","RemoteRegistry")) {
             $s = Get-Service -Name $sn -EA SilentlyContinue
             if ($s) {
@@ -973,6 +1130,48 @@ function Show-PadronizacaoGUI {
             & $log "  [ERRO] $($_.Exception.Message)" $corErro
         }
         $btnChaveOffice.Enabled = $true
+    })
+
+    $btnVerificar.Add_Click({
+        $btnVerificar.Enabled = $false
+        $btnIniciar.Enabled = $false
+        & $sepLog "VERIFICAR PADRONIZACAO"
+        & $log "  Verificando todas as etapas (somente leitura)..." $corTexto
+        $form.Cursor = [System.Windows.Forms.Cursors]::WaitCursor
+        try {
+            $itens = Get-PadronizacaoStatus -NomeEsperado $txtNome.Text.Trim() -DominioEsperado $txtDominio.Text.Trim() `
+                -Programas $listPrograms -CertPath "$($script:certPath)" -CertIsDir ([bool]$script:certIsDir)
+            $etapaAtual = ""
+            foreach ($it in $itens) {
+                if ($it.Etapa -ne $etapaAtual) {
+                    $etapaAtual = $it.Etapa
+                    & $log "" $corTexto
+                    & $log "  $etapaAtual" $corAmarelo
+                }
+                $marca = switch ($it.Estado) { "OK" { "[OK]   " } "FALTA" { "[FALTA]" } "AVISO" { "[AVISO]" } default { "[INFO] " } }
+                $cor = switch ($it.Estado) { "OK" { $corOk } "FALTA" { $corErro } "AVISO" { $corAviso } default { $corTexto } }
+                $det = if ($it.Detalhe) { " -- $($it.Detalhe)" } else { "" }
+                & $log "    $marca $($it.Item)$det" $cor
+            }
+            $nOk = @($itens | Where-Object { $_.Estado -eq "OK" }).Count
+            $faltam = @($itens | Where-Object { $_.Estado -eq "FALTA" })
+            $nAviso = @($itens | Where-Object { $_.Estado -eq "AVISO" }).Count
+            & $log "" $corTexto
+            & $log "  ================================================" $corDestaque
+            & $log "  RESUMO: $nOk OK | $($faltam.Count) FALTAM | $nAviso AVISOS" $(if ($faltam.Count -eq 0) { $corOk } else { $corAviso })
+            if ($faltam.Count -gt 0) {
+                & $log "  Pendentes:" $corAviso
+                foreach ($f in $faltam) { & $log "    - $($f.Etapa): $($f.Item)" $corAviso }
+            } else {
+                & $log "  Nenhuma pendencia encontrada." $corOk
+            }
+            & $log "  ================================================" $corDestaque
+        } catch {
+            & $log "  [ERRO] $($_.Exception.Message)" $corErro
+        }
+        $form.Cursor = [System.Windows.Forms.Cursors]::Default
+        $btnVerificar.Enabled = $true
+        $btnIniciar.Enabled = $true
     })
 
     $btnAtivar.Add_Click({
