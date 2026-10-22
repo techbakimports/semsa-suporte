@@ -538,15 +538,15 @@ function Show-PadronizacaoGUI {
     $panelProgs.Controls.Add($rbChoco)
 
     $listPrograms = @(
-        @{ ChocoId = "Temurin8jre";       Name = "Java (JRE)";     Extra = "" },
-        @{ ChocoId = "winrar";            Name = "WinRAR";          Extra = "" },
-        @{ ChocoId = "vlc";               Name = "VLC";             Extra = "" },
-        @{ ChocoId = "FoxitReader";       Name = "Foxit Reader";    Extra = "" },
-        @{ ChocoId = "pdf24";             Name = "PDF24";           Extra = "" },
-        @{ ChocoId = "libreoffice-still"; Name = "LibreOffice";     Extra = "" },
-        @{ ChocoId = "GoogleChrome";      Name = "Google Chrome";   Extra = "--ignore-checksums" },
-        @{ ChocoId = "Firefox";           Name = "Firefox";         Extra = "" },
-        @{ ChocoId = "ultravnc";          Name = "UltraVNC (GUI)";  Extra = "" }
+        @{ ChocoId = "Temurin8jre";       WingetId = "EclipseAdoptium.Temurin.8.JRE";      Name = "Java (JRE)";     Extra = "" },
+        @{ ChocoId = "winrar";            WingetId = "RARLab.WinRAR";                      Name = "WinRAR";          Extra = "" },
+        @{ ChocoId = "vlc";               WingetId = "VideoLAN.VLC";                       Name = "VLC";             Extra = "" },
+        @{ ChocoId = "FoxitReader";       WingetId = "Foxit.FoxitReader";                  Name = "Foxit Reader";    Extra = "" },
+        @{ ChocoId = "pdf24";             WingetId = "geeksoftwareGmbH.PDF24Creator";      Name = "PDF24";           Extra = "" },
+        @{ ChocoId = "libreoffice-still"; WingetId = "TheDocumentFoundation.LibreOffice";  Name = "LibreOffice";     Extra = "" },
+        @{ ChocoId = "GoogleChrome";      WingetId = "Google.Chrome";                      Name = "Google Chrome";   Extra = "--ignore-checksums" },
+        @{ ChocoId = "Firefox";           WingetId = "Mozilla.Firefox.pt-BR";              Name = "Firefox";         Extra = "" },
+        @{ ChocoId = "ultravnc";          WingetId = "uvncbvba.UltraVNC";                  Name = "UltraVNC (GUI)";  Extra = "" }
     )
 
     $cbProgs = @{}
@@ -574,6 +574,17 @@ function Show-PadronizacaoGUI {
     $lblSepProgs.Location = New-Object System.Drawing.Point(10, ($yP + 4))
     $panelProgs.Controls.Add($lblSepProgs)
     $yP += 14
+
+    # --- MODO WINGET (radio) ---
+    $rbWinget = New-Object System.Windows.Forms.RadioButton
+    $rbWinget.Text = "  INSTALACAO VIA WINGET (Windows 10/11)"
+    $rbWinget.Font = New-Object System.Drawing.Font("Consolas", 9, [System.Drawing.FontStyle]::Bold)
+    $rbWinget.ForeColor = $corAmarelo
+    $rbWinget.BackColor = $corPainel
+    $rbWinget.Size = New-Object System.Drawing.Size(440, 22)
+    $rbWinget.Location = New-Object System.Drawing.Point(5, $yP)
+    $panelProgs.Controls.Add($rbWinget)
+    $yP += 30
 
     # --- MODO STANDALONE (radio) ---
     $rbStandalone = New-Object System.Windows.Forms.RadioButton
@@ -624,6 +635,13 @@ function Show-PadronizacaoGUI {
             $lblStandaloneInfo.ForeColor = [System.Drawing.Color]::Gray
         }
     })
+    $rbWinget.Add_CheckedChanged({
+        if ($rbWinget.Checked) {
+            foreach ($key in $cbProgs.Keys) { $cbProgs[$key].Enabled = $true }
+            $btnEscolherPasta.Enabled = $false
+            $lblStandaloneInfo.ForeColor = [System.Drawing.Color]::Gray
+        }
+    })
     $rbStandalone.Add_CheckedChanged({
         if ($rbStandalone.Checked) {
             foreach ($key in $cbProgs.Keys) { $cbProgs[$key].Enabled = $false }
@@ -665,6 +683,14 @@ function Show-PadronizacaoGUI {
     $progressBar.Maximum = 1
     $progressBar.Value = 0
     $form.Controls.Add($progressBar)
+
+    $lblProgresso = New-Object System.Windows.Forms.Label
+    $lblProgresso.Text = ""
+    $lblProgresso.Font = New-Object System.Drawing.Font("Consolas", 8)
+    $lblProgresso.ForeColor = $corAmarelo
+    $lblProgresso.Size = New-Object System.Drawing.Size(195, 63)
+    $lblProgresso.Location = New-Object System.Drawing.Point(10, 407)
+    $form.Controls.Add($lblProgresso)
 
     $lblLog = New-Object System.Windows.Forms.Label
     $lblLog.Text = "  LOG DE EXECUCAO"
@@ -977,13 +1003,13 @@ function Show-PadronizacaoGUI {
         if ($txtDominio.Text.Trim() -ne "") { $totalEtapas++ }
         if ($cbEtapas["admin"].Checked) { $totalEtapas++ }
         if ($cbEtapas["progs"].Checked) {
-            if ($rbChoco.Checked) {
+            if ($rbChoco.Checked -or $rbWinget.Checked) {
                 $totalEtapas += @($listPrograms | Where-Object { $cbProgs[$_.ChocoId].Checked }).Count
             } else {
                 $totalEtapas++
             }
         }
-        $progressBar.Maximum = [Math]::Max($totalEtapas, 1)
+        $progressBar.Maximum = [Math]::Max($totalEtapas, 1) * 100
         $progressBar.Value = 0
 
         # Etapa 1 - Fuso
@@ -993,7 +1019,7 @@ function Show-PadronizacaoGUI {
                 Set-TimeZone -Id "SA Western Standard Time" -EA Stop
                 & $log "      [OK] Fuso configurado." $corOk
             } catch { & $log "      [ERRO] $($_.Exception.Message)" $corErro }
-            $progressBar.Value = [Math]::Min($progressBar.Value + 1, $progressBar.Maximum)
+            $progressBar.Value = [Math]::Min($progressBar.Value + 100, $progressBar.Maximum)
             [System.Windows.Forms.Application]::DoEvents()
         }
 
@@ -1004,7 +1030,7 @@ function Show-PadronizacaoGUI {
                 & $habilitarAssistencia
                 & $log "      [OK] Assistencia Remota habilitada." $corOk
             } catch { & $log "      [ERRO] $($_.Exception.Message)" $corErro }
-            $progressBar.Value = [Math]::Min($progressBar.Value + 1, $progressBar.Maximum)
+            $progressBar.Value = [Math]::Min($progressBar.Value + 100, $progressBar.Maximum)
             [System.Windows.Forms.Application]::DoEvents()
         }
 
@@ -1015,7 +1041,7 @@ function Show-PadronizacaoGUI {
                 Set-ItemProperty "HKLM:\System\CurrentControlSet\Control\Terminal Server" "fDenyTSConnections" 0 -EA Stop
                 & $log "      [OK] RDP habilitado." $corOk
             } catch { & $log "      [ERRO] $($_.Exception.Message)" $corErro }
-            $progressBar.Value = [Math]::Min($progressBar.Value + 1, $progressBar.Maximum)
+            $progressBar.Value = [Math]::Min($progressBar.Value + 100, $progressBar.Maximum)
             [System.Windows.Forms.Application]::DoEvents()
         }
 
@@ -1033,7 +1059,7 @@ function Show-PadronizacaoGUI {
                     & $log "      [OK] Renomeado. Reinicializacao necessaria." $corOk
                 } catch { & $log "      [ERRO] $($_.Exception.Message)" $corErro }
             }
-            $progressBar.Value = [Math]::Min($progressBar.Value + 1, $progressBar.Maximum)
+            $progressBar.Value = [Math]::Min($progressBar.Value + 100, $progressBar.Maximum)
             [System.Windows.Forms.Application]::DoEvents()
         }
 
@@ -1054,7 +1080,7 @@ function Show-PadronizacaoGUI {
                     & $log "      [OK] Ingressou no dominio. Reinicializacao necessaria." $corOk
                 } catch { & $log "      [ERRO] $($_.Exception.Message)" $corErro }
             }
-            $progressBar.Value = [Math]::Min($progressBar.Value + 1, $progressBar.Maximum)
+            $progressBar.Value = [Math]::Min($progressBar.Value + 100, $progressBar.Maximum)
             [System.Windows.Forms.Application]::DoEvents()
         }
 
@@ -1070,13 +1096,75 @@ function Show-PadronizacaoGUI {
                     & $log "      [OK] Conta admin ja existia -- mantida como estava (grupo '$($r.Grupo)'), senha nao foi alterada." $corOk
                 }
             } catch { & $log "      [ERRO] $($_.Exception.Message)" $corErro }
-            $progressBar.Value = [Math]::Min($progressBar.Value + 1, $progressBar.Maximum)
+            $progressBar.Value = [Math]::Min($progressBar.Value + 100, $progressBar.Maximum)
             [System.Windows.Forms.Application]::DoEvents()
         }
 
         # Etapa 7 - Programas
         if ($cbEtapas["progs"].Checked) {
             & $log "" $corInfo
+
+            # Executa choco/winget com stdout em arquivo temporario; mostra % no rotulo e na barra
+            $runPkg = {
+                param([string]$exe, [string]$pkgArgs, [string]$nome)
+                $tmpFile = [System.IO.Path]::GetTempFileName()
+                $exitCode = $null
+                $base = $progressBar.Value
+                $cron = [System.Diagnostics.Stopwatch]::StartNew()
+                $pos = 0
+                $pctAtual = -1
+                $ultimaLinha = ""
+                try {
+                    $proc = Start-Process -FilePath $exe -ArgumentList $pkgArgs `
+                        -RedirectStandardOutput $tmpFile -NoNewWindow -PassThru
+                    $null = $proc.Handle
+                    do {
+                        $terminou = $proc.HasExited
+                        $texto = ""
+                        try {
+                            $fs = [System.IO.FileStream]::new($tmpFile, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+                            $sr = New-Object System.IO.StreamReader($fs)
+                            $texto = $sr.ReadToEnd(); $sr.Dispose(); $fs.Dispose()
+                        } catch {}
+                        if ($texto.Length -gt $pos) {
+                            $novo = $texto.Substring($pos)
+                            if (-not $terminou) {
+                                $ult = $novo.LastIndexOfAny([char[]]"`r`n")
+                                if ($ult -lt 0) { $novo = "" } else { $novo = $novo.Substring(0, $ult + 1) }
+                            }
+                            $pos += $novo.Length
+                            foreach ($seg in ($novo -split "[\r\n]+")) {
+                                $t = $seg.Trim()
+                                if (-not $t) { continue }
+                                if ($t -match 'Progress:\s*(.*?)\s*(\d{1,3})%') { $pctAtual = [int]$Matches[2]; continue }
+                                if ($t -match '^Progress:') { continue }
+                                if ($t.Length -le 1) { continue }
+                                if ($t.Contains([string][char]0x2588) -or $t.Contains([string][char]0x2592)) { continue }
+                                if ($t -eq $ultimaLinha) { continue }
+                                $ultimaLinha = $t
+                                & $log "        $t" $corTexto
+                            }
+                        }
+                        $tempo = $cron.Elapsed.ToString('mm\:ss')
+                        if ($pctAtual -ge 100) {
+                            $lblProgresso.Text = "$nome`ninstalando... ($tempo)"
+                        } elseif ($pctAtual -ge 0) {
+                            $lblProgresso.Text = "$nome`nbaixando $pctAtual% ($tempo)"
+                        } else {
+                            $lblProgresso.Text = "$nome`naguarde... ($tempo)"
+                        }
+                        $progressBar.Value = [Math]::Min($base + [Math]::Max([Math]::Min($pctAtual, 99), 0), $progressBar.Maximum)
+                        [System.Windows.Forms.Application]::DoEvents()
+                        if (-not $terminou) { Start-Sleep -Milliseconds 300 }
+                    } while (-not $terminou)
+                    $proc.WaitForExit()
+                    $exitCode = [int]$proc.ExitCode
+                } finally {
+                    $progressBar.Value = $base
+                    Remove-Item $tmpFile -EA SilentlyContinue
+                }
+                return $exitCode
+            }
 
             if ($rbStandalone.Checked) {
                 # ---- MODO STANDALONE ----
@@ -1111,7 +1199,7 @@ function Show-PadronizacaoGUI {
                     } elseif ($instaladores.Count -gt 0) {
                         & $log "      Pasta: $($script:standalonePath)" $corTexto
                         & $log "      $($instaladores.Count) instalador(es) encontrado(s)" $corTexto
-                        $progressBar.Maximum = $progressBar.Value + $instaladores.Count
+                        $progressBar.Maximum = $progressBar.Value + ($instaladores.Count * 100)
                         $idxSt = 0
                         foreach ($inst in $instaladores) {
                             $idxSt++
@@ -1132,11 +1220,61 @@ function Show-PadronizacaoGUI {
                             } catch {
                                 & $log "      [ERRO] $($inst.Name): $($_.Exception.Message)" $corErro
                             }
-                            $progressBar.Value = [Math]::Min($progressBar.Value + 1, $progressBar.Maximum)
+                            $progressBar.Value = [Math]::Min($progressBar.Value + 100, $progressBar.Maximum)
                             [System.Windows.Forms.Application]::DoEvents()
                         }
                     }
                 }
+            } elseif ($rbWinget.Checked) {
+            # ---- MODO WINGET ----
+            & $log "  [7] Instalando programas via Winget..." $corInfo
+
+            if (-not (Get-Command winget -EA SilentlyContinue)) {
+                & $log "      [ERRO] Winget nao encontrado (requer Windows 10 1809+/11 com 'Instalador de Aplicativo')." $corErro
+                & $log "      Use o modo Chocolatey ou Standalone neste computador." $corAviso
+                $progressBar.Value = $progressBar.Maximum
+            } else {
+                $wgBase = "install --exact --source winget --accept-package-agreements --accept-source-agreements"
+                $selecionados = @($listPrograms | Where-Object { $cbProgs[$_.ChocoId].Checked -and $_.ChocoId -ne "ultravnc" })
+                $vncSelecionado = $cbProgs["ultravnc"].Checked
+                $totalWg = $selecionados.Count + [int]$vncSelecionado
+
+                $tratarWinget = {
+                    param([string]$nome, $codigo)
+                    if ($codigo -eq 0) {
+                        & $log "      [OK] $nome" $corOk
+                    } elseif ($codigo -eq -1978335189 -or $codigo -eq -1978335135) {
+                        & $log "      [OK] $nome (ja instalado)" $corOk
+                    } elseif ($codigo -eq -1978334967) {
+                        $script:guiNeedsRestart = $true
+                        & $log "      [OK] $nome (reinicializacao necessaria para concluir)" $corOk
+                    } else {
+                        & $log ("      [ERRO] {0} (cod: {1} / 0x{2:X8})" -f $nome, $codigo, $codigo) $corErro
+                    }
+                }
+
+                $idxWg = 0
+                foreach ($p in $selecionados) {
+                    $idxWg++
+                    & $log "      Instalando $($p.Name)..." $corInfo
+                    $codigo = & $runPkg "winget" "$wgBase --id $($p.WingetId) --silent --disable-interactivity" "[$idxWg/$totalWg] $($p.Name)"
+                    & $tratarWinget $p.Name $codigo
+                    $progressBar.Value = [Math]::Min($progressBar.Value + 100, $progressBar.Maximum)
+                    [System.Windows.Forms.Application]::DoEvents()
+                }
+
+                if ($vncSelecionado) {
+                    $idxWg++
+                    & $log "" $corInfo
+                    & $log "      Abrindo instalador do UltraVNC (interativo)..." $corAviso
+                    & $log "      Configure e finalize o instalador para continuar." $corAviso
+                    $codigo = & $runPkg "winget" "$wgBase --id uvncbvba.UltraVNC --interactive" "[$idxWg/$totalWg] UltraVNC (GUI)"
+                    & $tratarWinget "UltraVNC" $codigo
+                    $progressBar.Value = [Math]::Min($progressBar.Value + 100, $progressBar.Maximum)
+                    [System.Windows.Forms.Application]::DoEvents()
+                }
+            }
+            $lblProgresso.Text = ""
             } else {
             # ---- MODO CHOCOLATEY (original) ----
             & $log "  [7] Instalando programas via Chocolatey..." $corInfo
@@ -1166,75 +1304,41 @@ function Show-PadronizacaoGUI {
                 $selecionados = $listPrograms | Where-Object { $cbProgs[$_.ChocoId].Checked -and $_.ChocoId -ne "ultravnc" }
                 $vncSelecionado = $cbProgs["ultravnc"].Checked
 
-                $runChoco = {
-                    param([string]$chocoArgs)
-                    $tmpFile = [System.IO.Path]::GetTempFileName()
-                    $exitCode = $null
-                    try {
-                        $proc = Start-Process -FilePath "choco" -ArgumentList $chocoArgs `
-                            -RedirectStandardOutput $tmpFile -NoNewWindow -PassThru
-                        $linhasVistas = 0
-                        while (-not $proc.HasExited) {
-                            try {
-                                $fs = [System.IO.FileStream]::new($tmpFile, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
-                                $sr = New-Object System.IO.StreamReader($fs)
-                                $conteudo = $sr.ReadToEnd(); $sr.Dispose(); $fs.Dispose()
-                                $linhas = $conteudo -split "`r?`n"
-                                for ($i = $linhasVistas; $i -lt ($linhas.Count - 1); $i++) {
-                                    $t = $linhas[$i].Trim()
-                                    if ($t -and $t -notmatch '^Progress:') { & $log "        $t" $corTexto }
-                                }
-                                $linhasVistas = [Math]::Max($linhas.Count - 1, $linhasVistas)
-                            } catch {}
-                            [System.Windows.Forms.Application]::DoEvents()
-                            Start-Sleep -Milliseconds 300
-                        }
-                        $proc.WaitForExit()
-                        $exitCode = [int]$proc.ExitCode
-                        try {
-                            $fs = [System.IO.FileStream]::new($tmpFile, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
-                            $sr = New-Object System.IO.StreamReader($fs)
-                            $conteudo = $sr.ReadToEnd(); $sr.Dispose(); $fs.Dispose()
-                            $linhas = $conteudo -split "`r?`n"
-                            for ($i = $linhasVistas; $i -lt $linhas.Count; $i++) {
-                                $t = $linhas[$i].Trim()
-                                if ($t -and $t -notmatch '^Progress:') { & $log "        $t" $corTexto }
-                            }
-                        } catch {}
-                    } finally {
-                        Remove-Item $tmpFile -EA SilentlyContinue
-                    }
-                    return $exitCode
-                }
+                $selecionados = @($selecionados)
+                $totalCh = $selecionados.Count + [int]$vncSelecionado
+                $idxCh = 0
 
                 foreach ($p in $selecionados) {
+                    $idxCh++
                     & $log "      Instalando $($p.Name)..." $corInfo
-                    $argStr = "install $($p.ChocoId) -y --no-progress"
+                    $argStr = "install $($p.ChocoId) -y"
                     if ($p.Extra) { $argStr += " $($p.Extra)" }
-                    $codigo = & $runChoco $argStr
+                    $codigo = & $runPkg "choco" $argStr "[$idxCh/$totalCh] $($p.Name)"
                     if ($codigo -eq 0) {
                         & $log "      [OK] $($p.Name)" $corOk
                     } else {
                         & $log "      [ERRO] $($p.Name) (cod: $codigo)" $corErro
                     }
-                    $progressBar.Value = [Math]::Min($progressBar.Value + 1, $progressBar.Maximum)
+                    $progressBar.Value = [Math]::Min($progressBar.Value + 100, $progressBar.Maximum)
                     [System.Windows.Forms.Application]::DoEvents()
                 }
 
                 if ($vncSelecionado) {
+                    $idxCh++
                     & $log "" $corInfo
                     & $log "      Abrindo instalador do UltraVNC (interativo)..." $corAviso
                     & $log "      Configure e finalize o instalador para continuar." $corAviso
-                    $codigo = & $runChoco 'install ultravnc --override-arguments --install-arguments="/SP- /NORESTART" -y'
+                    $codigo = & $runPkg "choco" 'install ultravnc --override-arguments --install-arguments="/SP- /NORESTART" -y' "[$idxCh/$totalCh] UltraVNC (GUI)"
                     if ($codigo -eq 0) {
                         & $log "      [OK] UltraVNC instalado." $corOk
                     } else {
                         & $log "      [ERRO] UltraVNC falhou (cod: $codigo)." $corErro
                     }
-                    $progressBar.Value = [Math]::Min($progressBar.Value + 1, $progressBar.Maximum)
+                    $progressBar.Value = [Math]::Min($progressBar.Value + 100, $progressBar.Maximum)
                     [System.Windows.Forms.Application]::DoEvents()
                 }
             }
+            $lblProgresso.Text = ""
             }
         }
 
