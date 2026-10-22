@@ -243,25 +243,12 @@ Write-Host "Execute a funcao Enable-RemoteAssistance novamente para corrigir os 
 }
 
 function Set-AdminAccount {
-    # ACHADO DE SEGURANCA CRITICO (auditoria 2026-08-31): antes, esta funcao
-    # criava a conta com -NoPassword (sem senha nenhuma) e PasswordNeverExpires
-    # permanente -- uma porta dos fundos criada em toda maquina que passasse
-    # pela padronizacao (login local sem senha, com privilegio de admin).
-    # Agora gera uma senha aleatoria forte e devolve pro chamador mostrar na
-    # tela -- a senha nao fica salva em nenhum arquivo/log deste script, so'
-    # aparece uma vez pro tecnico anotar/entregar com seguranca.
-    $jaExistia = [bool](Get-LocalUser -Name "admin" -EA SilentlyContinue)
-    $senhaGerada = $null
-
-    if (-not $jaExistia) {
-        $charset = (48..57) + (65..90) + (97..122) + (33, 35, 36, 37, 38, 42)
-        $senhaGerada = -join ((1..16) | ForEach-Object { [char]($charset | Get-Random) })
-        $senhaSegura = ConvertTo-SecureString $senhaGerada -AsPlainText -Force
+    # Decisao do mantenedor: conta sem senha de proposito; o tecnico define a senha da zona depois.
+    if (-not (Get-LocalUser -Name "admin" -EA SilentlyContinue)) {
         try {
-            New-LocalUser -Name "admin" -Password $senhaSegura -Description "Conta criada via GUI" -PasswordNeverExpires $true -EA Stop
+            New-LocalUser -Name "admin" -NoPassword -Description "Conta criada via GUI" -PasswordNeverExpires $true -EA Stop
         } catch {
-            # Fallback: ainda uma senha aleatoria forte, nunca mais uma conta em branco.
-            $r = net user admin "$senhaGerada" /add /y 2>&1
+            $r = net user admin "" /add /y 2>&1
             if ($LASTEXITCODE -ne 0) { throw "net user falhou: $r" }
         }
     }
@@ -278,7 +265,7 @@ function Set-AdminAccount {
     if ($usersMem -contains "$env:COMPUTERNAME\admin" -or $usersMem -contains "admin") {
         Remove-LocalGroupMember -Group $usersGrp -Member "admin" -EA SilentlyContinue
     }
-    return [PSCustomObject]@{ Grupo = $grp; SenhaGerada = $senhaGerada; JaExistia = $jaExistia }
+    return $grp
 }
 
 function Test-ComputerName {
@@ -845,13 +832,8 @@ function Show-PadronizacaoGUI {
     $btnAdmin.Add_Click({
         & $sepLog "CRIAR CONTA ADMIN"
         try {
-            $r = Set-AdminAccount
-            if ($r.SenhaGerada) {
-                & $log "  [OK] Conta admin criada no grupo '$($r.Grupo)'." $corOk
-                & $log "  [IMPORTANTE] Senha gerada (anote com seguranca, nao fica salva em lugar nenhum): $($r.SenhaGerada)" $corAviso
-            } else {
-                & $log "  [OK] Conta admin ja existia -- mantida como estava (grupo '$($r.Grupo)'), senha nao foi alterada." $corOk
-            }
+            $grp = Set-AdminAccount
+            & $log "  [OK] Conta admin configurada no grupo '$grp'." $corOk
         } catch { & $log "  [ERRO] $($_.Exception.Message)" $corErro }
     })
 
@@ -1088,13 +1070,8 @@ function Show-PadronizacaoGUI {
         if ($cbEtapas["admin"].Checked) {
             & $log "  [6] Criando conta admin..." $corInfo
             try {
-                $r = Set-AdminAccount
-                if ($r.SenhaGerada) {
-                    & $log "      [OK] Conta admin criada no grupo '$($r.Grupo)'." $corOk
-                    & $log "      [IMPORTANTE] Senha gerada (anote com seguranca, nao fica salva em lugar nenhum): $($r.SenhaGerada)" $corAviso
-                } else {
-                    & $log "      [OK] Conta admin ja existia -- mantida como estava (grupo '$($r.Grupo)'), senha nao foi alterada." $corOk
-                }
+                $grp = Set-AdminAccount
+                & $log "      [OK] Conta admin configurada no grupo '$grp'." $corOk
             } catch { & $log "      [ERRO] $($_.Exception.Message)" $corErro }
             $progressBar.Value = [Math]::Min($progressBar.Value + 100, $progressBar.Maximum)
             [System.Windows.Forms.Application]::DoEvents()
