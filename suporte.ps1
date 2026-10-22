@@ -242,6 +242,70 @@ Write-Host "Execute a funcao Enable-RemoteAssistance novamente para corrigir os 
     }
 }
 
+function Get-OfficeStatus {
+    $nomesStatus = @{
+        0 = "Nao licenciado"; 1 = "Licenciado (ATIVO)"; 2 = "Tolerancia inicial (OOB)"
+        3 = "Tolerancia (OOT)"; 4 = "Tolerancia - nao genuino"; 5 = "Notificacao (NAO ATIVADO)"
+        6 = "Tolerancia estendida"
+    }
+    $motivos = @{
+        "0xC004F009" = "periodo de tolerancia expirou"
+        "0xC004F074" = "servidor KMS inacessivel"
+        "0xC004F00F" = "hardware mudou demais (ID fora da tolerancia)"
+        "0xC004F050" = "chave de produto invalida"
+        "0xC004F038" = "contagem do KMS insuficiente"
+    }
+
+    $instalacao = @()
+    $c2r = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Office\ClickToRun\Configuration" -EA SilentlyContinue
+    if ($c2r -and $c2r.ProductReleaseIds) {
+        $instalacao += "Click-to-Run: $($c2r.ProductReleaseIds) | versao $($c2r.VersionToReport) | $($c2r.Platform)"
+    }
+    $uninstKeys = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*",
+                  "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*"
+    Get-ItemProperty $uninstKeys -EA SilentlyContinue |
+        Where-Object { $_.DisplayName -match '^Microsoft (Office|365)' -and
+                       $_.DisplayName -notmatch 'Update|Runtime|Language|Proofing|Teams|Tools|Interop|Shared|Visio|Project' } |
+        Select-Object -First 4 | ForEach-Object { $instalacao += "$($_.DisplayName) | versao $($_.DisplayVersion)" }
+
+    $licencas = @()
+    try {
+        $licencas += @(Get-CimInstance SoftwareLicensingProduct -EA Stop `
+            -Filter "ApplicationId='0ff1ce15-a989-479d-af46-f275c6370663' AND PartialProductKey IS NOT NULL")
+    } catch {}
+    try {
+        $licencas += @(Get-CimInstance OfficeSoftwareProtectionProduct -EA Stop -Filter "PartialProductKey IS NOT NULL")
+    } catch {}
+
+    $itens = foreach ($l in $licencas) {
+        $cod = "0x{0:X8}" -f [uint32]$l.LicenseStatusReason
+        [PSCustomObject]@{
+            Nome        = $l.Name
+            Descricao   = $l.Description
+            Status      = [int]$l.LicenseStatus
+            StatusNome  = $nomesStatus[[int]$l.LicenseStatus]
+            ChaveParcial = $l.PartialProductKey
+            CodigoMotivo = $cod
+            Motivo      = $motivos[$cod]
+            DiasRestantes = [Math]::Round(([double]$l.GracePeriodRemaining) / 1440)
+        }
+    }
+    $contas = @()
+    Get-ChildItem Registry::HKEY_USERS -EA SilentlyContinue |
+        Where-Object { $_.PSChildName -match '^S-1-5-21-[\d-]+$' } | ForEach-Object {
+            $sid = $_.PSChildName
+            $usuario = try { (New-Object System.Security.Principal.SecurityIdentifier $sid).Translate([System.Security.Principal.NTAccount]).Value } catch { $sid }
+            Get-ChildItem "Registry::HKEY_USERS\$sid\Software\Microsoft\Office\16.0\Common\Identity\Identities" -EA SilentlyContinue | ForEach-Object {
+                $p = Get-ItemProperty $_.PSPath -EA SilentlyContinue
+                if ($p.EmailAddress -and -not ($contas | Where-Object { $_.Usuario -eq $usuario -and $_.Email -eq $p.EmailAddress })) {
+                    $contas += [PSCustomObject]@{ Usuario = $usuario; Email = $p.EmailAddress }
+                }
+            }
+        }
+
+    return [PSCustomObject]@{ Instalacao = @($instalacao); Licencas = @($itens); Contas = @($contas) }
+}
+
 function Set-AdminAccount {
     # Decisao do mantenedor: conta sem senha de proposito; o tecnico define a senha da zona depois.
     if (-not (Get-LocalUser -Name "admin" -EA SilentlyContinue)) {
@@ -350,20 +414,21 @@ function Show-PadronizacaoGUI {
     & $mkHeader "INFORMACOES" 5
     $btnInfoPC   = & $mkBtn "Info do PC"         22
     $btnChave    = & $mkBtn "Chave Windows"       47
-    $btnAtivar   = & $mkBtn "Ativar Win/Office"   72
+    $btnChaveOffice = & $mkBtn "Chave Office"     72
+    $btnAtivar   = & $mkBtn "Ativar Win/Office"   97
 
-    & $mkHeader "CONFIGURAR" 100
-    $btnAssist   = & $mkBtn "Assist. Remota"      117
-    $btnTestar   = & $mkBtn "Testar Assist."      142
-    $btnRDP      = & $mkBtn "Habilitar RDP"       167
-    $btnFuso     = & $mkBtn "Fuso Horario"        192
-    $btnAdmin    = & $mkBtn "Conta Admin"         217
+    & $mkHeader "CONFIGURAR" 125
+    $btnAssist   = & $mkBtn "Assist. Remota"      142
+    $btnTestar   = & $mkBtn "Testar Assist."      167
+    $btnRDP      = & $mkBtn "Habilitar RDP"       192
+    $btnFuso     = & $mkBtn "Fuso Horario"        217
+    $btnAdmin    = & $mkBtn "Conta Admin"         242
 
-    & $mkHeader "COMPUTADOR" 245
-    $btnRename   = & $mkBtn "Renomear PC"         262
-    $btnDominio  = & $mkBtn "Ingresso Dominio"    287
+    & $mkHeader "COMPUTADOR" 270
+    $btnRename   = & $mkBtn "Renomear PC"         287
+    $btnDominio  = & $mkBtn "Ingresso Dominio"    312
 
-    $botoesLaterais = @($btnInfoPC, $btnChave, $btnAtivar, $btnAssist, $btnTestar, $btnRDP, $btnFuso, $btnAdmin, $btnRename, $btnDominio)
+    $botoesLaterais = @($btnInfoPC, $btnChave, $btnChaveOffice, $btnAtivar, $btnAssist, $btnTestar, $btnRDP, $btnFuso, $btnAdmin, $btnRename, $btnDominio)
 
     $btnSair = New-Object System.Windows.Forms.Button
     $btnSair.Text = "SAIR"
@@ -372,8 +437,8 @@ function Show-PadronizacaoGUI {
     $btnSair.ForeColor = $corTexto
     $btnSair.FlatStyle = "Flat"
     $btnSair.FlatAppearance.BorderSize = 0
-    $btnSair.Size = New-Object System.Drawing.Size(170, 25)
-    $btnSair.Location = New-Object System.Drawing.Point(10, 330)
+    $btnSair.Size = New-Object System.Drawing.Size(170, 22)
+    $btnSair.Location = New-Object System.Drawing.Point(10, 338)
     $panelTools.Controls.Add($btnSair)
 
     # ----------------------------------------------------------
@@ -857,6 +922,57 @@ function Show-PadronizacaoGUI {
             & $log "  [ERRO] $($_.Exception.Message)" $corErro
         }
         $btnChave.Enabled = $true
+    })
+
+    $btnChaveOffice.Add_Click({
+        $btnChaveOffice.Enabled = $false
+        & $sepLog "STATUS DO OFFICE"
+        & $log "  Consultando licenciamento do Office..." $corTexto
+        try {
+            $of = Get-OfficeStatus
+            if ($of.Instalacao.Count -eq 0 -and $of.Licencas.Count -eq 0 -and $of.Contas.Count -eq 0) {
+                & $log "  [AVISO] Office nao encontrado neste computador." $corAviso
+            } else {
+                foreach ($i in $of.Instalacao) { & $log "  Instalado: $i" $corTexto }
+                if ($of.Contas.Count -gt 0) {
+                    & $log "  Contas Microsoft conectadas ao Office:" $corTexto
+                    foreach ($c in $of.Contas) { & $log "    $($c.Usuario) -> $($c.Email)" $corTexto }
+                }
+                if ($of.Licencas.Count -eq 0) {
+                    if ($of.Contas.Count -gt 0) {
+                        & $log "  [AVISO] Sem licenca por chave. Licenca por conta (Microsoft 365): confirme em Arquivo > Conta." $corAviso
+                    } else {
+                        & $log "  [AVISO] Office instalado, mas sem licenca/chave registrada (nunca ativado)." $corAviso
+                        & $log "  Use 'Ativar Win/Office' ou ative pelo proprio Office." $corAviso
+                    }
+                }
+                foreach ($l in $of.Licencas) {
+                    $cor = switch ($l.Status) { 1 { $corOk } { $_ -in 2, 3, 6 } { $corAviso } default { $corErro } }
+                    & $log "" $corTexto
+                    & $log "  Produto : $($l.Nome)" $corTexto
+                    & $log "  Status  : $($l.StatusNome)" $cor
+                    & $log "  Chave   : XXXXX-XXXXX-XXXXX-XXXXX-$($l.ChaveParcial)  (so os 5 ultimos caracteres ficam no Office)" $corTexto
+                    if ($l.Descricao) { & $log "  Tipo    : $($l.Descricao)" $corTexto }
+                    if ($l.Status -ne 1) {
+                        $mot = if ($l.Motivo) { " - $($l.Motivo)" } else { "" }
+                        & $log "  Motivo  : $($l.CodigoMotivo)$mot" $cor
+                    }
+                    if ($l.DiasRestantes -gt 0) { & $log "  Dias restantes (tolerancia/renovacao): $($l.DiasRestantes)" $corTexto }
+                }
+                $ativos = @($of.Licencas | Where-Object { $_.Status -eq 1 }).Count
+                & $log "" $corTexto
+                if ($ativos -gt 0) {
+                    & $log "  RESULTADO: Office ATIVO." $corOk
+                } elseif ($of.Contas.Count -gt 0) {
+                    & $log "  RESULTADO: sem licenca por chave ativa; ha conta conectada -- verifique em Arquivo > Conta." $corAviso
+                } elseif ($of.Licencas.Count -gt 0) {
+                    & $log "  RESULTADO: Office COM PROBLEMA (nenhuma licenca ativa)." $corErro
+                }
+            }
+        } catch {
+            & $log "  [ERRO] $($_.Exception.Message)" $corErro
+        }
+        $btnChaveOffice.Enabled = $true
     })
 
     $btnAtivar.Add_Click({
