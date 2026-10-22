@@ -312,7 +312,8 @@ function Get-PadronizacaoStatus {
         [string]$DominioEsperado = "",
         [object[]]$Programas = @(),
         [string]$CertPath = "",
-        [bool]$CertIsDir = $false
+        [bool]$CertIsDir = $false,
+        [object[]]$CertificadosPadrao = @()
     )
     $res = New-Object System.Collections.ArrayList
     $add = {
@@ -437,6 +438,12 @@ function Get-PadronizacaoStatus {
 
     # 8 - Certificado
     $e = "8. Certificado"
+    foreach ($cp in $CertificadosPadrao) {
+        $thumb = ($cp.Thumbprint -replace "\s", "").ToUpper()
+        $curto = "$($thumb.Substring(0, 4))...$($thumb.Substring($thumb.Length - 4))"
+        if (Test-Path "Cert:\LocalMachine\Root\$thumb") { & $add $e "$($cp.Name) ($curto)" "OK" "em Raiz Confiavel (maquina)" }
+        else { & $add $e "$($cp.Name) ($curto)" "FALTA" "nao esta em Raiz Confiavel (maquina)" }
+    }
     if ($CertPath -and (Test-Path $CertPath)) {
         $arqs = if ($CertIsDir) { @(Get-ChildItem -Path $CertPath -File | Where-Object { $_.Extension -in ".cer", ".crt" }) } else { @(Get-Item -Path $CertPath) }
         foreach ($a in $arqs) {
@@ -446,7 +453,7 @@ function Get-PadronizacaoStatus {
                 else { & $add $e $a.Name "FALTA" "nao esta em Raiz Confiavel (maquina)" }
             } catch { & $add $e $a.Name "AVISO" "arquivo nao e um certificado valido" }
         }
-    } else { & $add $e "Certificado" "INFO" "nenhum arquivo/pasta selecionado na GUI" }
+    } elseif ($CertificadosPadrao.Count -eq 0) { & $add $e "Certificado" "INFO" "nenhum arquivo/pasta selecionado na GUI" }
 
     return @($res)
 }
@@ -842,6 +849,9 @@ function Show-PadronizacaoGUI {
 
     $script:certPath = $null
     $script:certIsDir = $false
+    $certsPadrao = @(
+        @{ Name = "Certificado padrao Semsa"; Thumbprint = "23F4E23C6B21311DF5F2FD3C961C1249CD218675" }
+    )
 
     $mkBtnCert = {
         param([string]$txt, [int]$x)
@@ -1140,7 +1150,8 @@ function Show-PadronizacaoGUI {
         $form.Cursor = [System.Windows.Forms.Cursors]::WaitCursor
         try {
             $itens = Get-PadronizacaoStatus -NomeEsperado $txtNome.Text.Trim() -DominioEsperado $txtDominio.Text.Trim() `
-                -Programas $listPrograms -CertPath "$($script:certPath)" -CertIsDir ([bool]$script:certIsDir)
+                -Programas $listPrograms -CertPath "$($script:certPath)" -CertIsDir ([bool]$script:certIsDir) `
+                -CertificadosPadrao $certsPadrao
             $etapaAtual = ""
             foreach ($it in $itens) {
                 if ($it.Etapa -ne $etapaAtual) {
