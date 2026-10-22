@@ -524,6 +524,15 @@ function Show-PadronizacaoGUI {
     $rbChoco.Checked = $true
     $panelProgs.Controls.Add($rbChoco)
 
+    $rbWinget = New-Object System.Windows.Forms.RadioButton
+    $rbWinget.Text = "  INSTALACAO VIA WINGET (Windows 10/11)"
+    $rbWinget.Font = New-Object System.Drawing.Font("Consolas", 9, [System.Drawing.FontStyle]::Bold)
+    $rbWinget.ForeColor = $corAmarelo
+    $rbWinget.BackColor = $corPainel
+    $rbWinget.Size = New-Object System.Drawing.Size(440, 22)
+    $rbWinget.Location = New-Object System.Drawing.Point(5, 28)
+    $panelProgs.Controls.Add($rbWinget)
+
     $listPrograms = @(
         @{ ChocoId = "Temurin8jre";       WingetId = "EclipseAdoptium.Temurin.8.JRE";      Name = "Java (JRE)";     Extra = "" },
         @{ ChocoId = "winrar";            WingetId = "RARLab.WinRAR";                      Name = "WinRAR";          Extra = "" },
@@ -537,7 +546,7 @@ function Show-PadronizacaoGUI {
     )
 
     $cbProgs = @{}
-    $yP = 32; $col = 10
+    $yP = 58; $col = 10
     foreach ($p in $listPrograms) {
         $cb = New-Object System.Windows.Forms.CheckBox
         $cb.Text = $p.Name; $cb.Checked = $true
@@ -561,17 +570,6 @@ function Show-PadronizacaoGUI {
     $lblSepProgs.Location = New-Object System.Drawing.Point(10, ($yP + 4))
     $panelProgs.Controls.Add($lblSepProgs)
     $yP += 14
-
-    # --- MODO WINGET (radio) ---
-    $rbWinget = New-Object System.Windows.Forms.RadioButton
-    $rbWinget.Text = "  INSTALACAO VIA WINGET (Windows 10/11)"
-    $rbWinget.Font = New-Object System.Drawing.Font("Consolas", 9, [System.Drawing.FontStyle]::Bold)
-    $rbWinget.ForeColor = $corAmarelo
-    $rbWinget.BackColor = $corPainel
-    $rbWinget.Size = New-Object System.Drawing.Size(440, 22)
-    $rbWinget.Location = New-Object System.Drawing.Point(5, $yP)
-    $panelProgs.Controls.Add($rbWinget)
-    $yP += 30
 
     # --- MODO STANDALONE (radio) ---
     $rbStandalone = New-Object System.Windows.Forms.RadioButton
@@ -613,6 +611,78 @@ function Show-PadronizacaoGUI {
     $lblPastaSelecionada.Size = New-Object System.Drawing.Size(300, 16)
     $lblPastaSelecionada.Location = New-Object System.Drawing.Point(145, ($yP + 24))
     $panelProgs.Controls.Add($lblPastaSelecionada)
+
+    # --- INSTALAR CERTIFICADO (Raiz Confiavel, maquina local) ---
+    $yC = $yP + 52
+    $lblSepCert = New-Object System.Windows.Forms.Label
+    $lblSepCert.Text = ""
+    $lblSepCert.BorderStyle = "Fixed3D"
+    $lblSepCert.Size = New-Object System.Drawing.Size(430, 2)
+    $lblSepCert.Location = New-Object System.Drawing.Point(10, $yC)
+    $panelProgs.Controls.Add($lblSepCert)
+
+    $cbCert = New-Object System.Windows.Forms.CheckBox
+    $cbCert.Text = "  INSTALAR CERTIFICADO (Raiz Confiavel - maquina)"
+    $cbCert.Font = New-Object System.Drawing.Font("Consolas", 9, [System.Drawing.FontStyle]::Bold)
+    $cbCert.ForeColor = $corAmarelo
+    $cbCert.BackColor = $corPainel
+    $cbCert.Size = New-Object System.Drawing.Size(445, 22)
+    $cbCert.Location = New-Object System.Drawing.Point(5, ($yC + 8))
+    $panelProgs.Controls.Add($cbCert)
+
+    $script:certPath = $null
+    $script:certIsDir = $false
+
+    $mkBtnCert = {
+        param([string]$txt, [int]$x)
+        $b = New-Object System.Windows.Forms.Button
+        $b.Text = $txt
+        $b.Font = New-Object System.Drawing.Font("Consolas", 8)
+        $b.BackColor = $corBtnTool
+        $b.ForeColor = $corTexto
+        $b.FlatStyle = "Flat"
+        $b.FlatAppearance.BorderColor = [System.Drawing.Color]::FromArgb(70, 70, 90)
+        $b.Size = New-Object System.Drawing.Size(130, 24)
+        $b.Location = New-Object System.Drawing.Point($x, ($yC + 34))
+        $panelProgs.Controls.Add($b)
+        return $b
+    }
+    $btnCertArquivo = & $mkBtnCert "Escolher arquivo..." 10
+    $btnCertPasta   = & $mkBtnCert "Escolher pasta..." 145
+
+    $lblCertSelecionado = New-Object System.Windows.Forms.Label
+    $lblCertSelecionado.Text = "  Nenhum arquivo/pasta selecionado (.cer/.crt)"
+    $lblCertSelecionado.Font = New-Object System.Drawing.Font("Consolas", 7)
+    $lblCertSelecionado.ForeColor = [System.Drawing.Color]::Gray
+    $lblCertSelecionado.Size = New-Object System.Drawing.Size(440, 16)
+    $lblCertSelecionado.Location = New-Object System.Drawing.Point(5, ($yC + 62))
+    $panelProgs.Controls.Add($lblCertSelecionado)
+
+    $btnCertArquivo.Add_Click({
+        $fd = New-Object System.Windows.Forms.OpenFileDialog
+        $fd.Title = "Selecione o certificado (.cer)"
+        $fd.Filter = "Certificado (*.cer;*.crt)|*.cer;*.crt|Todos os arquivos (*.*)|*.*"
+        if ($fd.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+            $script:certPath = $fd.FileName
+            $script:certIsDir = $false
+            $lblCertSelecionado.Text = "  Arquivo: $([System.IO.Path]::GetFileName($fd.FileName))"
+            $lblCertSelecionado.ForeColor = $corOk
+            $cbCert.Checked = $true
+        }
+    })
+    $btnCertPasta.Add_Click({
+        $fd = New-Object System.Windows.Forms.FolderBrowserDialog
+        $fd.Description = "Selecione a pasta com os certificados (.cer/.crt)"
+        $fd.ShowNewFolderButton = $false
+        if ($fd.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+            $script:certPath = $fd.SelectedPath
+            $script:certIsDir = $true
+            $qtd = @(Get-ChildItem -Path $fd.SelectedPath -File | Where-Object { $_.Extension -in '.cer','.crt' }).Count
+            $lblCertSelecionado.Text = "  $qtd .cer/.crt encontrado(s)"
+            $lblCertSelecionado.ForeColor = if ($qtd -gt 0) { $corOk } else { $corErro }
+            $cbCert.Checked = ($qtd -gt 0)
+        }
+    })
 
     # --- Eventos de alternancia ---
     $rbChoco.Add_CheckedChanged({
@@ -991,6 +1061,7 @@ function Show-PadronizacaoGUI {
                 $totalEtapas++
             }
         }
+        if ($cbCert.Checked) { $totalEtapas++ }
         $progressBar.Maximum = [Math]::Max($totalEtapas, 1) * 100
         $progressBar.Value = 0
 
@@ -1317,6 +1388,40 @@ function Show-PadronizacaoGUI {
             }
             $lblProgresso.Text = ""
             }
+        }
+
+        # Etapa 8 - Certificado (Raiz Confiavel, maquina local)
+        if ($cbCert.Checked) {
+            & $log "" $corInfo
+            & $log "  [8] Instalando certificado(s) em Raiz Confiavel (maquina local)..." $corInfo
+            if (-not $script:certPath -or -not (Test-Path $script:certPath)) {
+                & $log "      [AVISO] Nenhum arquivo/pasta de certificado selecionado. Etapa ignorada." $corAviso
+            } else {
+                if ($script:certIsDir) {
+                    $arqsCert = @(Get-ChildItem -Path $script:certPath -File | Where-Object { $_.Extension -in '.cer','.crt' })
+                } else {
+                    $arqsCert = @(Get-Item -Path $script:certPath)
+                }
+                if ($arqsCert.Count -eq 0) {
+                    & $log "      [ERRO] Nenhum .cer/.crt encontrado em: $($script:certPath)" $corErro
+                }
+                foreach ($arqCert in $arqsCert) {
+                    try {
+                        $x509 = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2($arqCert.FullName)
+                        $saidaCert = & certutil.exe -addstore -f Root $arqCert.FullName 2>&1
+                        if ($LASTEXITCODE -ne 0) { throw "certutil cod $LASTEXITCODE - $(($saidaCert | Select-Object -Last 1))" }
+                        if (Test-Path "Cert:\LocalMachine\Root\$($x509.Thumbprint)") {
+                            & $log "      [OK] $($arqCert.Name) -- $($x509.Subject)" $corOk
+                        } else {
+                            throw "certificado nao encontrado no repositorio apos a importacao"
+                        }
+                    } catch {
+                        & $log "      [ERRO] $($arqCert.Name): $($_.Exception.Message)" $corErro
+                    }
+                }
+            }
+            $progressBar.Value = [Math]::Min($progressBar.Value + 100, $progressBar.Maximum)
+            [System.Windows.Forms.Application]::DoEvents()
         }
 
         if ($script:standalonePath) {
