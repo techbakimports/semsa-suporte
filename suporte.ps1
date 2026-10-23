@@ -242,12 +242,58 @@ Write-Host "Execute a funcao Enable-RemoteAssistance novamente para corrigir os 
     }
 }
 
-function Get-OfficeStatus {
-    $nomesStatus = @{
+function Get-NomeStatusLicenca {
+    param([int]$Status)
+    $nomes = @{
         0 = "Nao licenciado"; 1 = "Licenciado (ATIVO)"; 2 = "Tolerancia inicial (OOB)"
         3 = "Tolerancia (OOT)"; 4 = "Tolerancia - nao genuino"; 5 = "Notificacao (NAO ATIVADO)"
         6 = "Tolerancia estendida"
     }
+    return $nomes[$Status]
+}
+
+function ConvertTo-CanalLicenca {
+    param([string]$Descricao)
+    if ($Descricao -match "VOLUME_MAK") { return "MAK (volume)" }
+    if ($Descricao -match "VOLUME_KMS|KMSCLIENT") { return "KMS (volume)" }
+    if ($Descricao -match "OEM") { return "OEM" }
+    if ($Descricao -match "RETAIL\(Subscription\)|Subscription") { return "Retail (assinatura Microsoft 365)" }
+    if ($Descricao -match "RETAIL") { return "Retail" }
+    if ($Descricao -match "TIMEBASED|EVAL") { return "Avaliacao (temporaria)" }
+    if ($Descricao) { return "Outro" }
+    return "Desconhecido"
+}
+
+function Get-ResumoLicenca {
+    param([string]$ChaveParcial, [int]$Status, [string]$Canal)
+    $chave = if ($ChaveParcial) { "SIM (final $ChaveParcial)" } else { "NAO" }
+    $ativo = if ($Status -eq 1) { "SIM" } elseif ($Status -in 2, 3, 6) { "EM TOLERANCIA" } else { "NAO" }
+    return "Chave: $chave | Ativado: $ativo | Tipo: $Canal"
+}
+
+function Get-WindowsLicenseInfo {
+    $lic = @(Get-CimInstance SoftwareLicensingProduct -EA SilentlyContinue `
+        -Filter "ApplicationId='55c92734-d682-4d71-983e-d6ec3f16059f' AND PartialProductKey IS NOT NULL" |
+        Where-Object { -not $_.LicenseIsAddon })
+    if ($lic.Count -eq 0) { return $null }
+    $l = $lic | Sort-Object { $_.LicenseStatus -ne 1 } | Select-Object -First 1
+    $bios = $null
+    try { $bios = (Get-CimInstance SoftwareLicensingService -EA Stop).OA3xOriginalProductKey } catch {}
+    $kms = if ($l.KeyManagementServiceMachine) { $l.KeyManagementServiceMachine } else { $l.DiscoveredKeyManagementServiceMachineName }
+    return [PSCustomObject]@{
+        Nome          = $l.Name
+        Descricao     = $l.Description
+        Canal         = ConvertTo-CanalLicenca $l.Description
+        Status        = [int]$l.LicenseStatus
+        StatusNome    = Get-NomeStatusLicenca ([int]$l.LicenseStatus)
+        ChaveParcial  = $l.PartialProductKey
+        KmsHost       = $kms
+        DiasRestantes = [Math]::Round(([double]$l.GracePeriodRemaining) / 1440)
+        BiosChaveOem  = $bios
+    }
+}
+
+function Get-OfficeStatus {
     $motivos = @{
         "0xC004F009" = "periodo de tolerancia expirou"
         "0xC004F074" = "servidor KMS inacessivel"
@@ -282,8 +328,9 @@ function Get-OfficeStatus {
         [PSCustomObject]@{
             Nome        = $l.Name
             Descricao   = $l.Description
+            Canal       = ConvertTo-CanalLicenca $l.Description
             Status      = [int]$l.LicenseStatus
-            StatusNome  = $nomesStatus[[int]$l.LicenseStatus]
+            StatusNome  = Get-NomeStatusLicenca ([int]$l.LicenseStatus)
             ChaveParcial = $l.PartialProductKey
             CodigoMotivo = $cod
             Motivo      = $motivos[$cod]
@@ -454,6 +501,28 @@ function Get-PadronizacaoStatus {
             } catch { & $add $e $a.Name "AVISO" "arquivo nao e um certificado valido" }
         }
     } elseif ($CertificadosPadrao.Count -eq 0) { & $add $e "Certificado" "INFO" "nenhum arquivo/pasta selecionado na GUI" }
+
+    # 9 - Ativacao (Windows e Office)
+    $e = "9. Ativacao"
+    $estadoLic = { param($s) if ($s -eq 1) { "OK" } elseif ($s -in 2, 3, 6) { "AVISO" } else { "FALTA" } }
+    $wl = Get-WindowsLicenseInfo
+    if ($wl) {
+        & $add $e "Windows" (& $estadoLic $wl.Status) (Get-ResumoLicenca $wl.ChaveParcial $wl.Status $wl.Canal)
+    } else {
+        & $add $e "Windows" "AVISO" "nao foi possivel ler a licenca"
+    }
+    $of = Get-OfficeStatus
+    if ($of.Licencas.Count -gt 0) {
+        foreach ($l in $of.Licencas) {
+            & $add $e "Office ($($l.Nome))" (& $estadoLic $l.Status) (Get-ResumoLicenca $l.ChaveParcial $l.Status $l.Canal)
+        }
+    } elseif ($of.Contas.Count -gt 0) {
+        & $add $e "Office" "AVISO" "licenca por conta Microsoft ($($of.Contas[0].Email)); confirme em Arquivo > Conta"
+    } elseif ($of.Instalacao.Count -gt 0) {
+        & $add $e "Office" "FALTA" "instalado, mas sem licenca registrada"
+    } else {
+        & $add $e "Office" "INFO" "nao instalado"
+    }
 
     return @($res)
 }
@@ -1085,6 +1154,19 @@ function Show-PadronizacaoGUI {
             $status = (Get-Content $tmp -Raw -Encoding OEM -EA SilentlyContinue).Trim()
             Remove-Item $tmp -Force -EA SilentlyContinue
             if ($status) { & $log "  Status: $status" $corTexto }
+            $wl = Get-WindowsLicenseInfo
+            if ($wl) {
+                $corW = if ($wl.Status -eq 1) { $corOk } elseif ($wl.Status -in 2, 3, 6) { $corAviso } else { $corErro }
+                & $log "" $corTexto
+                & $log "  RESUMO  : $(Get-ResumoLicenca $wl.ChaveParcial $wl.Status $wl.Canal)" $corW
+                & $log "  Tipo    : $($wl.Canal)  ($($wl.Descricao))" $corTexto
+                & $log "  Licenca : $($wl.StatusNome)" $corW
+                & $log "  Final da chave em uso: $($wl.ChaveParcial)" $corTexto
+                if ($wl.KmsHost) { & $log "  Servidor KMS: $($wl.KmsHost)" $corTexto }
+                if ($wl.DiasRestantes -gt 0) { & $log "  Dias restantes (tolerancia/renovacao): $($wl.DiasRestantes)" $corTexto }
+                if ($wl.BiosChaveOem) { & $log "  BIOS: tem chave OEM embutida (final $($wl.BiosChaveOem.Substring($wl.BiosChaveOem.Length - 5)))" $corTexto }
+                else { & $log "  BIOS: sem chave OEM embutida." $corTexto }
+            }
         } catch {
             & $log "  [ERRO] $($_.Exception.Message)" $corErro
         }
@@ -1117,9 +1199,10 @@ function Show-PadronizacaoGUI {
                     $cor = switch ($l.Status) { 1 { $corOk } { $_ -in 2, 3, 6 } { $corAviso } default { $corErro } }
                     & $log "" $corTexto
                     & $log "  Produto : $($l.Nome)" $corTexto
+                    & $log "  RESUMO  : $(Get-ResumoLicenca $l.ChaveParcial $l.Status $l.Canal)" $cor
                     & $log "  Status  : $($l.StatusNome)" $cor
                     & $log "  Chave   : XXXXX-XXXXX-XXXXX-XXXXX-$($l.ChaveParcial)  (so os 5 ultimos caracteres ficam no Office)" $corTexto
-                    if ($l.Descricao) { & $log "  Tipo    : $($l.Descricao)" $corTexto }
+                    & $log "  Tipo    : $($l.Canal)  ($($l.Descricao))" $corTexto
                     if ($l.Status -ne 1) {
                         $mot = if ($l.Motivo) { " - $($l.Motivo)" } else { "" }
                         & $log "  Motivo  : $($l.CodigoMotivo)$mot" $cor
@@ -1599,58 +1682,56 @@ function Show-PadronizacaoGUI {
                         }
                     }
                 }
-            } elseif ($rbWinget.Checked) {
+            } elseif ($rbWinget.Checked -and (Get-Command winget -EA SilentlyContinue)) {
             # ---- MODO WINGET ----
             & $log "  [7] Instalando programas via Winget..." $corInfo
 
-            if (-not (Get-Command winget -EA SilentlyContinue)) {
-                & $log "      [ERRO] Winget nao encontrado (requer Windows 10 1809+/11 com 'Instalador de Aplicativo')." $corErro
-                & $log "      Use o modo Chocolatey ou Standalone neste computador." $corAviso
-                $progressBar.Value = $progressBar.Maximum
-            } else {
-                $wgBase = "install --exact --source winget --accept-package-agreements --accept-source-agreements"
-                $selecionados = @($listPrograms | Where-Object { $cbProgs[$_.ChocoId].Checked -and $_.ChocoId -ne "ultravnc" })
-                $vncSelecionado = $cbProgs["ultravnc"].Checked
-                $totalWg = $selecionados.Count + [int]$vncSelecionado
+            $wgBase = "install --exact --source winget --accept-package-agreements --accept-source-agreements"
+            $selecionados = @($listPrograms | Where-Object { $cbProgs[$_.ChocoId].Checked -and $_.ChocoId -ne "ultravnc" })
+            $vncSelecionado = $cbProgs["ultravnc"].Checked
+            $totalWg = $selecionados.Count + [int]$vncSelecionado
 
-                $tratarWinget = {
-                    param([string]$nome, $codigo)
-                    if ($codigo -eq 0) {
-                        & $log "      [OK] $nome" $corOk
-                    } elseif ($codigo -eq -1978335189 -or $codigo -eq -1978335135) {
-                        & $log "      [OK] $nome (ja instalado)" $corOk
-                    } elseif ($codigo -eq -1978334967) {
-                        $script:guiNeedsRestart = $true
-                        & $log "      [OK] $nome (reinicializacao necessaria para concluir)" $corOk
-                    } else {
-                        & $log ("      [ERRO] {0} (cod: {1} / 0x{2:X8})" -f $nome, $codigo, $codigo) $corErro
-                    }
+            $tratarWinget = {
+                param([string]$nome, $codigo)
+                if ($codigo -eq 0) {
+                    & $log "      [OK] $nome" $corOk
+                } elseif ($codigo -eq -1978335189 -or $codigo -eq -1978335135) {
+                    & $log "      [OK] $nome (ja instalado)" $corOk
+                } elseif ($codigo -eq -1978334967) {
+                    $script:guiNeedsRestart = $true
+                    & $log "      [OK] $nome (reinicializacao necessaria para concluir)" $corOk
+                } else {
+                    & $log ("      [ERRO] {0} (cod: {1} / 0x{2:X8})" -f $nome, $codigo, $codigo) $corErro
                 }
+            }
 
-                $idxWg = 0
-                foreach ($p in $selecionados) {
-                    $idxWg++
-                    & $log "      Instalando $($p.Name)..." $corInfo
-                    $codigo = & $runPkg "winget" "$wgBase --id $($p.WingetId) --silent --disable-interactivity" "[$idxWg/$totalWg] $($p.Name)"
-                    & $tratarWinget $p.Name $codigo
-                    $progressBar.Value = [Math]::Min($progressBar.Value + 100, $progressBar.Maximum)
-                    [System.Windows.Forms.Application]::DoEvents()
-                }
+            $idxWg = 0
+            foreach ($p in $selecionados) {
+                $idxWg++
+                & $log "      Instalando $($p.Name)..." $corInfo
+                $codigo = & $runPkg "winget" "$wgBase --id $($p.WingetId) --silent --disable-interactivity" "[$idxWg/$totalWg] $($p.Name)"
+                & $tratarWinget $p.Name $codigo
+                $progressBar.Value = [Math]::Min($progressBar.Value + 100, $progressBar.Maximum)
+                [System.Windows.Forms.Application]::DoEvents()
+            }
 
-                if ($vncSelecionado) {
-                    $idxWg++
-                    & $log "" $corInfo
-                    & $log "      Abrindo instalador do UltraVNC (interativo)..." $corAviso
-                    & $log "      Configure e finalize o instalador para continuar." $corAviso
-                    $codigo = & $runPkg "winget" "$wgBase --id uvncbvba.UltraVNC --interactive" "[$idxWg/$totalWg] UltraVNC (GUI)"
-                    & $tratarWinget "UltraVNC" $codigo
-                    $progressBar.Value = [Math]::Min($progressBar.Value + 100, $progressBar.Maximum)
-                    [System.Windows.Forms.Application]::DoEvents()
-                }
+            if ($vncSelecionado) {
+                $idxWg++
+                & $log "" $corInfo
+                & $log "      Abrindo instalador do UltraVNC (interativo)..." $corAviso
+                & $log "      Configure e finalize o instalador para continuar." $corAviso
+                $codigo = & $runPkg "winget" "$wgBase --id uvncbvba.UltraVNC --interactive" "[$idxWg/$totalWg] UltraVNC (GUI)"
+                & $tratarWinget "UltraVNC" $codigo
+                $progressBar.Value = [Math]::Min($progressBar.Value + 100, $progressBar.Maximum)
+                [System.Windows.Forms.Application]::DoEvents()
             }
             $lblProgresso.Text = ""
             } else {
-            # ---- MODO CHOCOLATEY (original) ----
+            # ---- MODO CHOCOLATEY (original; tambem e o fallback do winget) ----
+            if ($rbWinget.Checked) {
+                & $log "  [7] [AVISO] Winget nao encontrado (requer Windows 10 1809+/11 com 'Instalador de Aplicativo')." $corAviso
+                & $log "      Usando Chocolatey como alternativa." $corAviso
+            }
             & $log "  [7] Instalando programas via Chocolatey..." $corInfo
 
             $chocoOk = $false
