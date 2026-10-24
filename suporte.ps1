@@ -1,3 +1,6 @@
+# Versao do script: manter igual no README, CHANGELOG e CLAUDE.md; somar 1 no ultimo digito a cada modificacao
+$script:VersaoApp = "1.1.3"
+
 # Primeiro, definimos todas as funcoes
 
 
@@ -580,7 +583,7 @@ function Show-PadronizacaoGUI {
     $corBtnTool  = [System.Drawing.Color]::FromArgb(55, 55, 70)
 
     $form = New-Object System.Windows.Forms.Form
-    $form.Text = "SEMSA Suporte"
+    $form.Text = "SEMSA Suporte v$($script:VersaoApp)"
     $form.Size = New-Object System.Drawing.Size(930, 760)
     $form.StartPosition = "CenterScreen"
     $form.BackColor = $corFundo
