@@ -1,5 +1,5 @@
 # Versao do script: manter igual no README, CHANGELOG e CLAUDE.md; somar 1 no ultimo digito a cada modificacao
-$script:VersaoApp = "1.1.3"
+$script:VersaoApp = "1.1.4"
 
 # Primeiro, definimos todas as funcoes
 
@@ -565,6 +565,78 @@ function Test-ComputerName {
     return $null
 }
 
+# Executa o pnputil.exe (de 64 bits, mesmo em PowerShell 32 bits) e devolve codigo de saida + texto.
+# -OnTick recebe o tempo decorrido (mm:ss) a cada ciclo, para a GUI atualizar o rotulo sem congelar.
+function Invoke-PnpUtil {
+    param([string]$ArgumentList, [scriptblock]$OnTick)
+    $pnp = Join-Path $env:SystemRoot "System32\pnputil.exe"
+    if ([Environment]::Is64BitOperatingSystem -and -not [Environment]::Is64BitProcess) {
+        $pnp = Join-Path $env:SystemRoot "Sysnative\pnputil.exe"
+    }
+    if (-not (Test-Path $pnp)) { throw "pnputil.exe nao encontrado em $pnp" }
+
+    $tmpOut = [System.IO.Path]::GetTempFileName()
+    $tmpErr = [System.IO.Path]::GetTempFileName()
+    $exitCode = $null
+    $saida = ""
+    $cron = [System.Diagnostics.Stopwatch]::StartNew()
+    try {
+        $proc = Start-Process -FilePath $pnp -ArgumentList $ArgumentList `
+            -RedirectStandardOutput $tmpOut -RedirectStandardError $tmpErr -NoNewWindow -PassThru
+        $null = $proc.Handle
+        while (-not $proc.HasExited) {
+            if ($OnTick) { & $OnTick $cron.Elapsed.ToString('mm\:ss') }
+            [System.Windows.Forms.Application]::DoEvents()
+            Start-Sleep -Milliseconds 300
+        }
+        $proc.WaitForExit()
+        $exitCode = [int]$proc.ExitCode
+        # com a saida redirecionada o pnputil escreve em ANSI (1252 no pt-BR), nao em OEM
+        $ansi = [System.Text.Encoding]::GetEncoding([System.Globalization.CultureInfo]::CurrentCulture.TextInfo.ANSICodePage)
+        $saida = [System.IO.File]::ReadAllText($tmpOut, $ansi) + [System.IO.File]::ReadAllText($tmpErr, $ansi)
+    } finally {
+        Remove-Item $tmpOut, $tmpErr -EA SilentlyContinue
+    }
+    return [pscustomobject]@{ ExitCode = $exitCode; Output = $saida }
+}
+
+# Exporta todos os drivers de terceiros do repositorio de drivers para <PastaBase>\Drivers_<PC>_<data>.
+# Requer Windows 10 1607 ou superior (pnputil /export-driver); nao exige Administrador.
+function Export-DriversSemsa {
+    param([Parameter(Mandatory)][string]$PastaBase, [scriptblock]$OnTick)
+    $nome = "Drivers_{0}_{1}" -f $env:COMPUTERNAME, (Get-Date -Format 'yyyyMMdd')
+    $destino = Join-Path $PastaBase $nome
+    if (Test-Path $destino) { $destino = Join-Path $PastaBase ("{0}_{1}" -f $nome, (Get-Date -Format 'HHmmss')) }
+    New-Item -ItemType Directory -Path $destino -Force -EA Stop | Out-Null
+
+    $r = Invoke-PnpUtil -ArgumentList "/export-driver * `"$destino`"" -OnTick $OnTick
+    $arquivos = @(Get-ChildItem -Path $destino -Recurse -File -EA SilentlyContinue)
+    $pacotes = @($arquivos | Where-Object { $_.Extension -eq ".inf" }).Count
+    $bytes = ($arquivos | Measure-Object -Property Length -Sum).Sum
+    if (-not $bytes) { $bytes = 0 }
+    return [pscustomobject]@{
+        Ok        = ($r.ExitCode -eq 0 -and $pacotes -gt 0)
+        ExitCode  = $r.ExitCode
+        Destino   = $destino
+        Pacotes   = $pacotes
+        TamanhoMB = [Math]::Round($bytes / 1MB, 1)
+        Saida     = $r.Output
+    }
+}
+
+# Instala (importa) todos os .inf de uma pasta e subpastas com uma unica chamada do pnputil.
+# Requer Administrador (sem ele o pnputil devolve codigo 5). Codigo 3010 = "instalado, reinicio necessario" e conta como sucesso.
+function Import-DriversSemsa {
+    param([Parameter(Mandatory)][string]$Pasta, [scriptblock]$OnTick)
+    $r = Invoke-PnpUtil -ArgumentList "/add-driver `"$(Join-Path $Pasta '*.inf')`" /subdirs /install" -OnTick $OnTick
+    return [pscustomobject]@{
+        Ok       = ($r.ExitCode -eq 0 -or $r.ExitCode -eq 3010)
+        ExitCode = $r.ExitCode
+        Reinicio = ($r.ExitCode -eq 3010)
+        Saida    = $r.Output
+    }
+}
+
 # GUI de padronizacao
 function Show-PadronizacaoGUI {
     Add-Type -AssemblyName System.Windows.Forms
@@ -635,24 +707,25 @@ function Show-PadronizacaoGUI {
         return $b
     }
 
-    & $mkHeader "INFORMACOES" 5
-    $btnInfoPC   = & $mkBtn "Info do PC"         22
-    $btnChave    = & $mkBtn "Chave Windows"       47
-    $btnChaveOffice = & $mkBtn "Chave Office"     72
-    $btnAtivar   = & $mkBtn "Ativar Win/Office"   97
+    & $mkHeader "INFORMACOES" 3
+    $btnInfoPC   = & $mkBtn "Info do PC"         19
+    $btnChave    = & $mkBtn "Chave Windows"       43
+    $btnChaveOffice = & $mkBtn "Chave Office"     67
+    $btnAtivar   = & $mkBtn "Ativar Win/Office"   91
 
-    & $mkHeader "CONFIGURAR" 125
-    $btnAssist   = & $mkBtn "Assist. Remota"      142
-    $btnTestar   = & $mkBtn "Testar Assist."      167
-    $btnRDP      = & $mkBtn "Habilitar RDP"       192
-    $btnFuso     = & $mkBtn "Fuso Horario"        217
-    $btnAdmin    = & $mkBtn "Conta Admin"         242
+    & $mkHeader "CONFIGURAR" 116
+    $btnAssist   = & $mkBtn "Assist. Remota"      132
+    $btnTestar   = & $mkBtn "Testar Assist."      156
+    $btnRDP      = & $mkBtn "Habilitar RDP"       180
+    $btnFuso     = & $mkBtn "Fuso Horario"        204
+    $btnAdmin    = & $mkBtn "Conta Admin"         228
 
-    & $mkHeader "COMPUTADOR" 270
-    $btnRename   = & $mkBtn "Renomear PC"         287
-    $btnDominio  = & $mkBtn "Ingresso Dominio"    312
+    & $mkHeader "COMPUTADOR" 253
+    $btnRename   = & $mkBtn "Renomear PC"         269
+    $btnDominio  = & $mkBtn "Ingresso Dominio"    293
+    $btnFerramentas = & $mkBtn "Ferramentas"      317
 
-    $botoesLaterais = @($btnInfoPC, $btnChave, $btnChaveOffice, $btnAtivar, $btnAssist, $btnTestar, $btnRDP, $btnFuso, $btnAdmin, $btnRename, $btnDominio)
+    $botoesLaterais = @($btnInfoPC, $btnChave, $btnChaveOffice, $btnAtivar, $btnAssist, $btnTestar, $btnRDP, $btnFuso, $btnAdmin, $btnRename, $btnDominio, $btnFerramentas)
 
     $btnSair = New-Object System.Windows.Forms.Button
     $btnSair.Text = "SAIR"
@@ -662,7 +735,7 @@ function Show-PadronizacaoGUI {
     $btnSair.FlatStyle = "Flat"
     $btnSair.FlatAppearance.BorderSize = 0
     $btnSair.Size = New-Object System.Drawing.Size(170, 22)
-    $btnSair.Location = New-Object System.Drawing.Point(10, 338)
+    $btnSair.Location = New-Object System.Drawing.Point(10, 340)
     $panelTools.Controls.Add($btnSair)
 
     # ----------------------------------------------------------
@@ -1441,6 +1514,137 @@ function Show-PadronizacaoGUI {
             } else {
                 & $log "  [AVISO] Dominio e usuario sao obrigatorios." $corAviso
             }
+        }
+    })
+
+    # Janela secundaria "Ferramentas": cada ferramenta e um botao que devolve a escolha em
+    # $script:ferramentaEscolhida; a execucao acontece depois, usando o log da janela principal.
+    $btnFerramentas.Add_Click({
+        $script:ferramentaEscolhida = $null
+        $dlg = New-Object System.Windows.Forms.Form
+        $dlg.Text = "Ferramentas"
+        $dlg.Size = New-Object System.Drawing.Size(360, 215)
+        $dlg.StartPosition = "CenterParent"
+        $dlg.BackColor = $corFundo; $dlg.ForeColor = $corTexto
+        $dlg.FormBorderStyle = "FixedDialog"
+        $dlg.MaximizeBox = $false; $dlg.MinimizeBox = $false
+
+        $lblSec = New-Object System.Windows.Forms.Label
+        $lblSec.Text = "DRIVERS"
+        $lblSec.Font = New-Object System.Drawing.Font("Consolas", 8, [System.Drawing.FontStyle]::Bold)
+        $lblSec.ForeColor = $corDestaque
+        $lblSec.Location = New-Object System.Drawing.Point(10, 12)
+        $lblSec.Size = New-Object System.Drawing.Size(320, 14)
+        $dlg.Controls.Add($lblSec)
+
+        $lblDesc = New-Object System.Windows.Forms.Label
+        $lblDesc.Text = "Backup e restauracao dos drivers de terceiros do Windows. Importar requer Administrador."
+        $lblDesc.Font = New-Object System.Drawing.Font("Consolas", 8)
+        $lblDesc.Location = New-Object System.Drawing.Point(10, 30)
+        $lblDesc.Size = New-Object System.Drawing.Size(320, 30)
+        $dlg.Controls.Add($lblDesc)
+
+        $addBtnF = { param([string]$t, [int]$x, [int]$y, [int]$w, $cor)
+            $b = New-Object System.Windows.Forms.Button
+            $b.Text = $t; $b.Location = New-Object System.Drawing.Point($x, $y)
+            $b.Size = New-Object System.Drawing.Size($w, 26)
+            $b.Font = New-Object System.Drawing.Font("Consolas", 8)
+            $b.BackColor = $cor; $b.ForeColor = $corTexto; $b.FlatStyle = "Flat"
+            $dlg.Controls.Add($b); return $b
+        }
+
+        $bExp = & $addBtnF "Exportar drivers (backup)" 10 66 320 $corBotao
+        $bExp.Add_Click({ $script:ferramentaEscolhida = "drivers-exportar"; $dlg.DialogResult = "OK"; $dlg.Close() })
+
+        $bImp = & $addBtnF "Importar drivers (restaurar)" 10 98 320 $corBotao
+        $bImp.Add_Click({ $script:ferramentaEscolhida = "drivers-importar"; $dlg.DialogResult = "OK"; $dlg.Close() })
+
+        $bFec = & $addBtnF "Fechar" 125 138 90 ([System.Drawing.Color]::FromArgb(80, 80, 80))
+        $bFec.Add_Click({ $dlg.DialogResult = "Cancel"; $dlg.Close() })
+        $dlg.CancelButton = $bFec
+
+        [void]$dlg.ShowDialog($form)
+        $escolha = $script:ferramentaEscolhida
+        if (-not $escolha) { return }
+
+        $souAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+        $tick = { param([string]$t) $lblProgresso.Text = "Drivers`naguarde... ($t)" }
+
+        if ($escolha -eq "drivers-exportar") {
+            $fd = New-Object System.Windows.Forms.FolderBrowserDialog
+            $fd.Description = "Escolha a pasta onde salvar o backup. Sera criada uma subpasta Drivers_NOME-DO-PC_data."
+            if ($fd.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) { return }
+
+            $botoesLaterais | ForEach-Object { $_.Enabled = $false }
+            $btnIniciar.Enabled = $false
+            $form.Cursor = [System.Windows.Forms.Cursors]::WaitCursor
+            & $sepLog "EXPORTAR DRIVERS"
+            & $log "  [INFO] Exportando drivers de terceiros para '$($fd.SelectedPath)'..." $corInfo
+            & $log "         Pode levar alguns minutos." $corTexto
+            try {
+                $r = Export-DriversSemsa -PastaBase $fd.SelectedPath -OnTick $tick
+                if ($r.Ok) {
+                    & $log "  [OK] $($r.Pacotes) pacotes de driver exportados ($($r.TamanhoMB) MB)." $corOk
+                    & $log "       Pasta: $($r.Destino)" $corTexto
+                } else {
+                    & $log "  [ERRO] Exportacao falhou (codigo $($r.ExitCode); $($r.Pacotes) pacotes gerados)." $corErro
+                    foreach ($linha in ($r.Saida -split "[\r\n]+" | Where-Object { $_.Trim() } | Select-Object -Last 5)) { & $log "         $($linha.Trim())" $corTexto }
+                }
+            } catch { & $log "  [ERRO] $($_.Exception.Message)" $corErro }
+            $lblProgresso.Text = ""
+            $form.Cursor = [System.Windows.Forms.Cursors]::Default
+            $btnIniciar.Enabled = $true
+            $botoesLaterais | ForEach-Object { $_.Enabled = $true }
+        }
+        elseif ($escolha -eq "drivers-importar") {
+            if (-not $souAdmin) {
+                & $sepLog "IMPORTAR DRIVERS"
+                & $log "  [ERRO] Execute o script como Administrador para importar drivers." $corErro
+                return
+            }
+            $fd = New-Object System.Windows.Forms.FolderBrowserDialog
+            $fd.Description = "Escolha a pasta com os drivers exportados (subpastas com .inf sao incluidas)."
+            if ($fd.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) { return }
+
+            $qtd = @(Get-ChildItem -Path $fd.SelectedPath -Filter "*.inf" -Recurse -File -EA SilentlyContinue).Count
+            if ($qtd -eq 0) {
+                & $sepLog "IMPORTAR DRIVERS"
+                & $log "  [AVISO] Nenhum arquivo .inf encontrado em: $($fd.SelectedPath)" $corAviso
+                return
+            }
+            $resp = [System.Windows.Forms.MessageBox]::Show(
+                "Foram encontrados $qtd arquivos .inf em:`n$($fd.SelectedPath)`n`nInstalar todos os drivers neste computador?`n(Use drivers do mesmo modelo de PC.)",
+                "Importar drivers",
+                [System.Windows.Forms.MessageBoxButtons]::YesNo,
+                [System.Windows.Forms.MessageBoxIcon]::Question
+            )
+            if ($resp -ne [System.Windows.Forms.DialogResult]::Yes) { return }
+
+            $botoesLaterais | ForEach-Object { $_.Enabled = $false }
+            $btnIniciar.Enabled = $false
+            $form.Cursor = [System.Windows.Forms.Cursors]::WaitCursor
+            & $sepLog "IMPORTAR DRIVERS"
+            & $log "  [INFO] Instalando $qtd arquivos .inf de '$($fd.SelectedPath)'..." $corInfo
+            & $log "         Pode levar alguns minutos." $corTexto
+            try {
+                $r = Import-DriversSemsa -Pasta $fd.SelectedPath -OnTick $tick
+                $logArq = Join-Path $env:TEMP ("SemsaSuporte_drivers_{0}.log" -f (Get-Date -Format 'yyyyMMdd_HHmmss'))
+                Set-Content -Path $logArq -Value $r.Saida -Encoding UTF8 -EA SilentlyContinue
+                if ($r.Ok) {
+                    & $log "  [OK] Drivers importados (codigo $($r.ExitCode))." $corOk
+                    if ($r.Reinicio) {
+                        $script:guiNeedsRestart = $true
+                        & $log "  [AVISO] Reinicio necessario para concluir a instalacao de drivers." $corAviso
+                    }
+                } else {
+                    & $log "  [ERRO] pnputil retornou codigo $($r.ExitCode). Alguns pacotes podem ter falhado." $corErro
+                }
+                & $log "       Detalhes por pacote (saida do pnputil): $logArq" $corTexto
+            } catch { & $log "  [ERRO] $($_.Exception.Message)" $corErro }
+            $lblProgresso.Text = ""
+            $form.Cursor = [System.Windows.Forms.Cursors]::Default
+            $btnIniciar.Enabled = $true
+            $botoesLaterais | ForEach-Object { $_.Enabled = $true }
         }
     })
 

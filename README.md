@@ -2,7 +2,7 @@
 
 Ferramenta de suporte técnico em PowerShell para a **SEMSA / Manaus**. Abre uma janela (WinForms, tema escuro) que **padroniza computadores Windows** em uma única execução: fuso horário, Assistência Remota, RDP, nome do PC, domínio, conta admin, instalação de programas e certificado. Também **verifica** se a padronização já foi feita e mostra o **tipo de ativação** do Windows e do Office.
 
-**Versão:** 1.1.3 · **Plataforma:** Windows 10/11 · **PowerShell:** 5.1 · [Changelog](CHANGELOG.md)
+**Versão:** 1.1.4 · **Plataforma:** Windows 10/11 · **PowerShell:** 5.1 · [Changelog](CHANGELOG.md)
 
 ---
 
@@ -68,6 +68,16 @@ SEMSA_SUPORTE.bat
 | **Conta Admin** | Cria/ajusta a conta `admin` |
 | **Renomear PC** | Pede o novo nome e renomeia (exige reinicialização) |
 | **Ingresso Domínio** | Pede domínio, usuário e senha e ingressa (exige reinicialização) |
+| **Ferramentas** | Abre uma janela com ferramentas extras. Hoje: **Drivers** (veja abaixo) |
+
+### Ferramentas > Drivers
+
+| Opção | O que faz |
+|---|---|
+| **Exportar drivers (backup)** | Escolha uma pasta; o script cria `Drivers_<NOME-DO-PC>_<data>` dentro dela e exporta os drivers de terceiros (`pnputil /export-driver *`). Não exige Administrador. Os drivers nativos do Windows não entram |
+| **Importar drivers (restaurar)** | Escolha a pasta do backup; o script conta os `.inf`, pede confirmação e instala todos (`pnputil /add-driver "pasta\*.inf" /subdirs /install`). Exige Administrador. Use drivers do mesmo modelo de PC. A saída detalhada por pacote fica em `%TEMP%\SemsaSuporte_drivers_<data>.log`. Código 3010 do `pnputil` = instalado, reinício necessário |
+
+A exportação precisa do Windows 10 1607 ou superior (`pnputil /export-driver`). A janela fica responsiva durante a operação, que pode levar alguns minutos.
 
 ---
 

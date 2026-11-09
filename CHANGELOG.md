@@ -2,6 +2,16 @@
 
 Todas as alterações notáveis neste projeto serão documentadas neste arquivo.
 
+## [1.1.4] - 2026-11-09
+
+### Adicionado
+- Botão **Ferramentas** (grupo COMPUTADOR, abaixo de Ingresso Domínio): abre uma janela secundária de ferramentas extras
+- **Ferramentas > Drivers**: *Exportar drivers* (backup dos drivers de terceiros para `Drivers_<PC>_<data>`, sem exigir Administrador) e *Importar drivers* (instala todos os `.inf` de uma pasta com confirmação, exige Administrador, grava a saída do `pnputil` em `%TEMP%`)
+- Funções `Invoke-PnpUtil`, `Export-DriversSemsa` e `Import-DriversSemsa`; o `pnputil` roda em segundo plano com a janela responsiva, usa `Sysnative` em PowerShell 32 bits e a saída é lida em ANSI
+
+### Alterado
+- Espaçamento dos botões laterais reduzido em 1 a 2 pixels para caber o novo botão sem mudar o tamanho da janela
+
 ## [1.1.3] - 2026-10-23
 
 Versão que consolida o script GUI-only (maio a outubro de 2026) e **unifica a numeração**: a partir daqui o script, o README, o CHANGELOG, o CLAUDE.md, a nota do Obsidian e a memória usam o mesmo número, e a cada modificação soma-se 1 no último dígito (próxima: 1.1.4). A versão aparece no título da janela. As entradas 1.3.0, 1.2.0 e 1.1.2 abaixo são do histórico anterior, com numeração descontinuada.
