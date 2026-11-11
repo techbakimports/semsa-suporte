@@ -2,7 +2,7 @@
 
 Ferramenta de suporte técnico em PowerShell para a **SEMSA / Manaus**. Abre uma janela (WinForms, tema escuro) que **padroniza computadores Windows** em uma única execução: fuso horário, Assistência Remota, RDP, nome do PC, domínio, conta admin, instalação de programas e certificado. Também **verifica** se a padronização já foi feita e mostra o **tipo de ativação** do Windows e do Office.
 
-**Versão:** 1.1.5 · **Plataforma:** Windows 10/11 · **PowerShell:** 5.1 · [Changelog](CHANGELOG.md)
+**Versão:** 1.1.6 · **Plataforma:** Windows 10/11 · **PowerShell:** 5.1 · [Changelog](CHANGELOG.md)
 
 ---
 
@@ -68,7 +68,7 @@ SEMSA_SUPORTE.bat
 | **Conta Admin** | Cria/ajusta a conta `admin` |
 | **Renomear PC** | Pede o novo nome e renomeia (exige reinicialização) |
 | **Ingresso Domínio** | Pede domínio, usuário e senha e ingressa (exige reinicialização) |
-| **Ferramentas** | Abre uma janela com ferramentas extras. Hoje: **Drivers** (veja abaixo) |
+| **Ferramentas** | Abre uma janela com ferramentas extras. Hoje: **Drivers** e **Registro Remoto** (veja abaixo) |
 
 ### Ferramentas > Drivers
 
@@ -79,6 +79,17 @@ SEMSA_SUPORTE.bat
 
 A exportação precisa do Windows 10 1607 ou superior (`pnputil /export-driver`). A janela fica responsiva durante a operação, que pode levar alguns minutos.
 
+### Ferramentas > Registro Remoto
+
+O serviço `RemoteRegistry` permite que outro computador leia ou altere o registro deste PC pela rede (exige conta de administrador). **Não é necessário para o RDP nem para a Assistência Remota**, e o Windows o mantém desabilitado por padrão; por isso a padronização **não o liga mais** (até a 1.1.5 ele era ligado junto com o RDP).
+
+| Opção | O que faz |
+|---|---|
+| **Habilitar** | Define o serviço como Automático e o inicia. Use só se alguma ferramenta (por exemplo, inventário) precisar. Exige Administrador |
+| **Desabilitar** | Para o serviço e o define como Desabilitado. Serve para limpar PCs padronizados em versões anteriores. Exige Administrador |
+
+O VERIFICAR mostra um `[AVISO]` se o serviço estiver ativo; não é contado como pendência.
+
 ---
 
 ## Padronização automática (botão INICIAR PADRONIZAÇÃO)
@@ -88,7 +99,7 @@ As etapas rodam nesta ordem. Fuso, Assistência Remota, RDP, conta admin e progr
 | # | Etapa | O que faz |
 |---|---|---|
 | 1 | **Fuso horário** | `Set-TimeZone` para `SA Western Standard Time` (Manaus, UTC-04:00) |
-| 2 | **Assistência Remota** | Registro (`fAllowToGetHelp`, `fDenyTSConnections`), remove política que bloqueia, habilita regras de firewall do RDP (por identificador de grupo, **independente do idioma**) e `RemoteAssistance*`, e deixa `TermService`, `SessionEnv`, `UmRdpService` e `RemoteRegistry` automáticos e rodando |
+| 2 | **Assistência Remota** | Registro (`fAllowToGetHelp`, `fDenyTSConnections`), remove política que bloqueia, habilita regras de firewall do RDP (por identificador de grupo, **independente do idioma**) e `RemoteAssistance*`, e deixa `TermService`, `SessionEnv` e `UmRdpService` automáticos e rodando (o `RemoteRegistry` deixou de ser ligado na 1.1.6) |
 | 3 | **RDP** | `fDenyTSConnections = 0` (repete parte da etapa 2, sem problema) |
 | 4 | **Renomear PC** *(opcional)* | Valida (até 15 caracteres, sem espaços nem `\ / : * ? " < > \|`, não só números) e executa `Rename-Computer` |
 | 5 | **Domínio** *(opcional)* | `Add-Computer` com usuário e senha informados |
@@ -163,7 +174,7 @@ O botão **VERIFICAR PADRONIZAÇÃO** não altera nada. Ele confere cada etapa e
 | Etapa | Como confere |
 |---|---|
 | 1. Fuso | `TimeZoneInfo.Local` = `SA Western Standard Time` |
-| 2. Assistência Remota | Registro (e política que bloqueia), regras `RemoteAssistance*` do firewall, serviços rodando |
+| 2. Assistência Remota | Registro (e política que bloqueia), regras `RemoteAssistance*` do firewall, serviços `TermService`/`SessionEnv`/`UmRdpService` rodando; `[AVISO]` se o `RemoteRegistry` estiver ativo (não é necessário) |
 | 3. RDP | `fDenyTSConnections = 0`, regras de firewall do RDP, porta 3389 escutando |
 | 4. Nome | Compara com o campo da janela (campo vazio = só mostra o atual) |
 | 5. Domínio | Compara com o campo da janela (campo vazio = só mostra o atual) |

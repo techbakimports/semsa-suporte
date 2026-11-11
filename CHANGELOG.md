@@ -2,6 +2,17 @@
 
 Todas as alterações notáveis neste projeto serão documentadas neste arquivo.
 
+## [1.1.6] - 2026-11-11
+
+### Adicionado
+- **Ferramentas > Registro Remoto**: botões *Habilitar* e *Desabilitar* para o serviço `RemoteRegistry`, sob demanda e com exigência de Administrador. O *Desabilitar* limpa PCs padronizados em versões anteriores
+- VERIFICAR: `[AVISO]` quando o `RemoteRegistry` está ativo (não conta como pendência)
+
+### Alterado
+- A padronização e o botão **Assist. Remota** **não ligam mais o `RemoteRegistry`**: ele não é necessário para o RDP nem para a Assistência Remota e é desabilitado por padrão no Windows (reduz a superfície de ataque). Ficam só `TermService`, `SessionEnv` e `UmRdpService`
+- VERIFICAR: o `RemoteRegistry` deixou de ser exigido na lista de serviços da etapa 2 (antes aparecia `[FALTA]` em PCs com o RDP correto)
+- Janela **Ferramentas** maior (360x320) para caber a nova seção
+
 ## [1.1.5] - 2026-11-11
 
 ### Adicionado

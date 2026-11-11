@@ -1,5 +1,5 @@
 # Versao do script: manter igual no README, CHANGELOG e CLAUDE.md; somar 1 no ultimo digito a cada modificacao
-$script:VersaoApp = "1.1.5"
+$script:VersaoApp = "1.1.6"
 
 # Primeiro, definimos todas as funcoes
 
@@ -395,12 +395,17 @@ function Get-PadronizacaoStatus {
         else { & $add $e "Firewall" "FALTA" "regras de Assistencia Remota desabilitadas" }
     } catch { & $add $e "Firewall" "AVISO" "nao foi possivel consultar o firewall" }
     $parados = @()
-    foreach ($sn in @("TermService", "SessionEnv", "UmRdpService", "RemoteRegistry")) {
+    foreach ($sn in @("TermService", "SessionEnv", "UmRdpService")) {
         $s = Get-Service -Name $sn -EA SilentlyContinue
         if ($s -and $s.Status -ne "Running") { $parados += $sn }
     }
-    if ($parados.Count -eq 0) { & $add $e "Servicos (TermService, SessionEnv, UmRdpService, RemoteRegistry)" "OK" "" }
+    if ($parados.Count -eq 0) { & $add $e "Servicos (TermService, SessionEnv, UmRdpService)" "OK" "" }
     else { & $add $e "Servicos" "FALTA" "parados: $($parados -join ', ')" }
+    # RemoteRegistry nao e necessario para RDP/Assistencia: so avisa se estiver ativo (desabilitar em Ferramentas)
+    $rr = Get-Service -Name "RemoteRegistry" -EA SilentlyContinue
+    if ($rr -and ($rr.Status -eq "Running" -or $rr.StartType -eq "Automatic")) {
+        & $add $e "Registro Remoto (RemoteRegistry)" "AVISO" "ativo; nao e necessario para o RDP (desabilite em Ferramentas)"
+    }
 
     # 3 - RDP
     $e = "3. RDP"
@@ -1197,7 +1202,7 @@ function Show-PadronizacaoGUI {
         Set-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\Remote Assistance" "fAllowToGetHelp" 1 -EA SilentlyContinue
         Enable-NetFirewallRule -Group "@FirewallAPI.dll,-28752" -EA SilentlyContinue
         Get-NetFirewallRule -EA SilentlyContinue | Where-Object { $_.Name -like "RemoteAssistance*" } | Enable-NetFirewallRule -EA SilentlyContinue
-        foreach ($sn in @("TermService","SessionEnv","UmRdpService","RemoteRegistry")) {
+        foreach ($sn in @("TermService","SessionEnv","UmRdpService")) {
             $s = Get-Service -Name $sn -EA SilentlyContinue
             if ($s) {
                 if ($s.StartType -eq "Disabled") { Set-Service $sn -StartupType Automatic -EA SilentlyContinue }
@@ -1546,7 +1551,7 @@ function Show-PadronizacaoGUI {
         $script:ferramentaEscolhida = $null
         $dlg = New-Object System.Windows.Forms.Form
         $dlg.Text = "Ferramentas"
-        $dlg.Size = New-Object System.Drawing.Size(360, 215)
+        $dlg.Size = New-Object System.Drawing.Size(360, 320)
         $dlg.StartPosition = "CenterParent"
         $dlg.BackColor = $corFundo; $dlg.ForeColor = $corTexto
         $dlg.FormBorderStyle = "FixedDialog"
@@ -1582,7 +1587,28 @@ function Show-PadronizacaoGUI {
         $bImp = & $addBtnF "Importar drivers (restaurar)" 10 98 320 $corBotao
         $bImp.Add_Click({ $script:ferramentaEscolhida = "drivers-importar"; $dlg.DialogResult = "OK"; $dlg.Close() })
 
-        $bFec = & $addBtnF "Fechar" 125 138 90 ([System.Drawing.Color]::FromArgb(80, 80, 80))
+        $lblSec2 = New-Object System.Windows.Forms.Label
+        $lblSec2.Text = "REGISTRO REMOTO"
+        $lblSec2.Font = New-Object System.Drawing.Font("Consolas", 8, [System.Drawing.FontStyle]::Bold)
+        $lblSec2.ForeColor = $corDestaque
+        $lblSec2.Location = New-Object System.Drawing.Point(10, 140)
+        $lblSec2.Size = New-Object System.Drawing.Size(320, 14)
+        $dlg.Controls.Add($lblSec2)
+
+        $lblDesc2 = New-Object System.Windows.Forms.Label
+        $lblDesc2.Text = "Servico RemoteRegistry (acesso ao registro pela rede). Nao e necessario para o RDP; habilite so se alguma ferramenta precisar. Requer Administrador."
+        $lblDesc2.Font = New-Object System.Drawing.Font("Consolas", 8)
+        $lblDesc2.Location = New-Object System.Drawing.Point(10, 158)
+        $lblDesc2.Size = New-Object System.Drawing.Size(320, 44)
+        $dlg.Controls.Add($lblDesc2)
+
+        $bRegOn = & $addBtnF "Habilitar" 10 206 155 $corBotao
+        $bRegOn.Add_Click({ $script:ferramentaEscolhida = "regremoto-habilitar"; $dlg.DialogResult = "OK"; $dlg.Close() })
+
+        $bRegOff = & $addBtnF "Desabilitar" 175 206 155 $corBotao
+        $bRegOff.Add_Click({ $script:ferramentaEscolhida = "regremoto-desabilitar"; $dlg.DialogResult = "OK"; $dlg.Close() })
+
+        $bFec = & $addBtnF "Fechar" 125 246 90 ([System.Drawing.Color]::FromArgb(80, 80, 80))
         $bFec.Add_Click({ $dlg.DialogResult = "Cancel"; $dlg.Close() })
         $dlg.CancelButton = $bFec
 
@@ -1618,6 +1644,30 @@ function Show-PadronizacaoGUI {
             $form.Cursor = [System.Windows.Forms.Cursors]::Default
             $btnIniciar.Enabled = $true
             $botoesLaterais | ForEach-Object { $_.Enabled = $true }
+        }
+        elseif ($escolha -eq "regremoto-habilitar" -or $escolha -eq "regremoto-desabilitar") {
+            $ligar = ($escolha -eq "regremoto-habilitar")
+            & $sepLog "REGISTRO REMOTO"
+            if (-not $souAdmin) {
+                & $log "  [ERRO] Execute o script como Administrador para alterar o Registro Remoto." $corErro
+                return
+            }
+            try {
+                if ($ligar) {
+                    Set-Service -Name "RemoteRegistry" -StartupType Automatic -EA Stop
+                    Start-Service -Name "RemoteRegistry" -EA Stop
+                } else {
+                    Stop-Service -Name "RemoteRegistry" -Force -EA SilentlyContinue
+                    Set-Service -Name "RemoteRegistry" -StartupType Disabled -EA Stop
+                }
+                $rr = Get-Service -Name "RemoteRegistry" -EA Stop
+                $okEstado = if ($ligar) { $rr.Status -eq "Running" } else { $rr.Status -eq "Stopped" -and $rr.StartType -eq "Disabled" }
+                if ($okEstado) {
+                    & $log "  [OK] Registro Remoto $(if ($ligar) { 'habilitado' } else { 'desabilitado' }) (estado: $($rr.Status), inicio: $($rr.StartType))." $corOk
+                } else {
+                    & $log "  [AVISO] Estado final inesperado (estado: $($rr.Status), inicio: $($rr.StartType))." $corAviso
+                }
+            } catch { & $log "  [ERRO] $($_.Exception.Message)" $corErro }
         }
         elseif ($escolha -eq "drivers-importar") {
             if (-not $souAdmin) {
