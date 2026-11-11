@@ -2,7 +2,7 @@
 
 Ferramenta de suporte técnico em PowerShell para a **SEMSA / Manaus**. Abre uma janela (WinForms, tema escuro) que **padroniza computadores Windows** em uma única execução: fuso horário, Assistência Remota, RDP, nome do PC, domínio, conta admin, instalação de programas e certificado. Também **verifica** se a padronização já foi feita e mostra o **tipo de ativação** do Windows e do Office.
 
-**Versão:** 1.1.7 · **Plataforma:** Windows 10/11 · **PowerShell:** 5.1 · [Changelog](CHANGELOG.md)
+**Versão:** 1.1.9 · **Plataforma:** Windows 10/11 · **PowerShell:** 5.1 · [Changelog](CHANGELOG.md)
 
 ---
 
@@ -68,7 +68,7 @@ SEMSA_SUPORTE.bat
 | **Conta Admin** | Cria/ajusta a conta `admin` |
 | **Renomear PC** | Pede o novo nome e renomeia (exige reinicialização) |
 | **Ingresso Domínio** | Pede domínio, usuário e senha e ingressa (exige reinicialização) |
-| **Ferramentas** | Abre uma janela com ferramentas extras. Hoje: **Drivers**, **Programas** (WizTree e Transwiz) e **Registro Remoto** (veja abaixo) |
+| **Ferramentas** | Abre uma janela com ferramentas extras. Hoje: **Drivers**, **Gerenciadores de pacotes** (winget e Chocolatey), **Programas** (WizTree e Transwiz) e **Registro Remoto** (veja abaixo) |
 
 ### Ferramentas > Drivers
 
@@ -79,9 +79,26 @@ SEMSA_SUPORTE.bat
 
 A exportação precisa do Windows 10 1607 ou superior (`pnputil /export-driver`). A janela fica responsiva durante a operação, que pode levar alguns minutos.
 
+### Ferramentas > Gerenciadores de pacotes
+
+Dois botões lado a lado, um para o **Winget** e outro para o **Chocolatey**. Ao abrir a janela, o script procura cada um:
+
+- **Já instalado:** o botão mostra a versão (por exemplo, `Winget v1.29.380`, `Chocolatey 2.7.4`). Ao clicar, o log mostra a versão e o caminho do executável.
+- **Não instalado:** o botão fica como `Instalar Winget` / `Instalar Chocolatey`. Ao clicar, o script pergunta e instala; exige **Administrador** e **internet**. O log guarda os detalhes em `%TEMP%\SemsaSuporte_<winget|chocolatey>_<data>.log`.
+
+**Como o winget é instalado** (para o usuário atual; exige Windows 10 1809 ou superior):
+
+1. Baixa do GitHub `microsoft/winget-cli` o pacote oficial `.msixbundle` (cerca de 210 MB), confere a assinatura digital da Microsoft e instala com `Add-AppxPackage`.
+2. Se o VCLibs e o UI.Xaml 2.8 já existirem no PC, instala só o pacote. Senão, baixa também o `DesktopAppInstaller_Dependencies.zip` (cerca de 95 MB) e usa as dependências da arquitetura do PC.
+3. Se o download direto falhar, tenta o módulo `Microsoft.WinGet.Client` (`Repair-WinGetPackageManager`), que usa o PSGallery.
+
+O Chocolatey é instalado pelo script oficial (`chocolatey.org/install.ps1`). Em ambos os casos o processo roda em um PowerShell filho, e a janela continua responsiva.
+
+Após instalar, o `winget` já vale para o restante da sessão do script; em outros terminais, abra um novo. Se o Transwiz ou outro programa de **Ferramentas > Programas** precisar do winget e ele não existir, a mensagem manda instalá-lo aqui.
+
 ### Ferramentas > Programas
 
-Um botão por programa. Ao clicar, o script procura o programa já instalado (atalho no Menu Iniciar, depois o `.exe` em `Arquivos de Programas`) e o abre. Se não achar, pergunta se deve instalar e instala **pelo winget**, exigindo Administrador.
+Um botão por programa. Ao clicar, o script procura o programa já instalado (atalho no Menu Iniciar **cujo destino seja um `.exe`**, depois o `.exe` em `Arquivos de Programas`) e o abre. Atalhos para manual em PDF, desinstalador ou site são ignorados. Se não achar, pergunta se deve instalar e instala **pelo winget**, exigindo Administrador.
 
 Cada botão mostra, logo abaixo, uma descrição curta do que a ferramenta faz.
 

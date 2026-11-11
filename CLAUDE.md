@@ -37,9 +37,12 @@ powershell -ExecutionPolicy Bypass -File .\suporte.ps1
 | `Test-ComputerName` | 587 | Valida nome do PC (até 15 caracteres, sem espaços/inválidos) |
 | `Invoke-ExeAguardando` | 598 | Executa um programa com stdout/stderr em arquivos temporários, janela responsiva (`DoEvents`) e `-OnTick`; devolve código e saída |
 | `Invoke-PnpUtil` | 627 | Roda o `pnputil.exe` (Sysnative em PS 32 bits) via `Invoke-ExeAguardando`; saída em ANSI |
-| `Find-ProgramaFerramenta` / `Install-ProgramaFerramenta` | 639-662 | Ferramentas > Programas: acha o programa (atalho do Menu Iniciar, depois `.exe`) e instala por winget (ou Chocolatey só se houver `ChocoId`) |
-| `Export-DriversSemsa` / `Import-DriversSemsa` | 699-723 | Exporta (`/export-driver *`) e importa (`/add-driver "pasta\*.inf" /subdirs /install`) drivers de terceiros |
-| `Show-PadronizacaoGUI` | 735 | GUI WinForms dark theme — entry point único; etapas, botões, janela Ferramentas e executor `$runPkg` |
+| `Find-ProgramaFerramenta` | 640 | Ferramentas > Programas: acha o programa (atalho do Menu Iniciar **cujo destino é um `.exe`**, nunca PDF/desinstalador; depois `.exe` em Arquivos de Programas) |
+| `Find-Winget` / `Get-WingetVersao` / `Find-Chocolatey` / `Get-ChocolateyVersao` | 671-734 | Acham o `winget.exe`/`choco.exe` (PATH, alias, pasta do pacote; `-AddToPath` põe no PATH do processo) e leem a versão |
+| `Install-Chocolatey` / `Install-Winget` | 734-858 | Ferramentas > Gerenciadores de pacotes: instalam em um PowerShell filho (janela responsiva). Winget: msixbundle oficial do GitHub + assinatura + `Add-AppxPackage` (dependências só se faltarem), plano B módulo `Microsoft.WinGet.Client` |
+| `Install-ProgramaFerramenta` | 858 | Instala um programa de Ferramentas por winget (ou Chocolatey só se houver `ChocoId`) |
+| `Export-DriversSemsa` / `Import-DriversSemsa` | 891-915 | Exporta (`/export-driver *`) e importa (`/add-driver "pasta\*.inf" /subdirs /install`) drivers de terceiros |
+| `Show-PadronizacaoGUI` | 927 | GUI WinForms dark theme — entry point único; etapas, botões, janela Ferramentas e executor `$runPkg` |
 
 ### GUI: etapas de padronização (dentro de Show-PadronizacaoGUI)
 1. Fuso horário (Manaus)  2. Assistência Remota (registro, firewall por ID de grupo, serviços)  3. RDP
@@ -49,7 +52,7 @@ powershell -ExecutionPolicy Bypass -File .\suporte.ps1
 Botões: INICIAR PADRONIZACAO, **VERIFICAR PADRONIZACAO** (somente leitura) e laterais (Info do PC, Chave Windows, Chave Office, Ativar Win/Office, Assist. Remota, Testar Assist., Habilitar RDP, Fuso Horario, Conta Admin, Renomear PC, Ingresso Dominio, **Ferramentas**).
 
 ### Janela Ferramentas (botão em COMPUTADOR, abaixo de Ingresso Dominio)
-Janela secundária modal (padrão `$dlg`, como Renomear/Domínio): cada ferramenta é um botão que grava a escolha em `$script:ferramentaEscolhida`; a execução roda depois no log da janela principal. Hoje tem **Drivers**, **Programas** (WizTree e Transwiz: abre se já instalado; senão pergunta e instala por winget, exige admin; sem winget, Chocolatey só para quem tem `ChocoId`, hoje só o WizTree; para somar um programa, acrescentar uma linha em `$listFerramentas`, incluindo `Desc`, a descrição curta exibida abaixo do botão) e **Registro Remoto** (*Habilitar*/*Desabilitar* o serviço `RemoteRegistry`, exige admin; a padronização **não o liga mais**, pois o RDP não depende dele, e o VERIFICAR só dá `[AVISO]` se estiver ativo). Drivers: *Exportar* (cria `<pasta>\Drivers_<PC>_<data>`; **não exige admin**) e *Importar* (exige admin, pede confirmação, usa uma chamada `pnputil` e grava a saída em `%TEMP%\SemsaSuporte_drivers_*.log`; código 3010 = reinício necessário). Só exporta drivers de terceiros (`oemNN.inf`), não os nativos do Windows.
+Janela secundária modal (padrão `$dlg`, como Renomear/Domínio): cada ferramenta é um botão que grava a escolha em `$script:ferramentaEscolhida`; a execução roda depois no log da janela principal. Hoje tem **Drivers**, **Gerenciadores de pacotes** (botões lado a lado *Winget* e *Chocolatey*: se instalado mostram a versão, clique = versão e caminho no log; se não, `Instalar ...` com confirmação, exige admin e internet; tags `winget-info/instalar` e `choco-info/instalar`), **Programas** (WizTree e Transwiz: abre se já instalado; senão pergunta e instala por winget, exige admin; sem winget, Chocolatey só para quem tem `ChocoId`, hoje só o WizTree; para somar um programa, acrescentar uma linha em `$listFerramentas`, incluindo `Desc`, a descrição curta exibida abaixo do botão) e **Registro Remoto** (*Habilitar*/*Desabilitar* o serviço `RemoteRegistry`, exige admin; a padronização **não o liga mais**, pois o RDP não depende dele, e o VERIFICAR só dá `[AVISO]` se estiver ativo). Drivers: *Exportar* (cria `<pasta>\Drivers_<PC>_<data>`; **não exige admin**) e *Importar* (exige admin, pede confirmação, usa uma chamada `pnputil` e grava a saída em `%TEMP%\SemsaSuporte_drivers_*.log`; código 3010 = reinício necessário). Só exporta drivers de terceiros (`oemNN.inf`), não os nativos do Windows.
 
 ### Instalação de programas
 - Chocolatey e Winget usam a mesma lista `$listPrograms` (ids em `ChocoId`/`WingetId`, regex de detecção em `Pattern`). Winget ausente -> cai no Chocolatey com aviso.
@@ -63,8 +66,8 @@ Chocolatey/Winget: Java 8 (Temurin JRE), WinRAR, VLC, Foxit Reader, PDF24, Libre
 - Execução como Administrador
 - Internet para Chocolatey/winget/ativação; rede local para domínio e, se usada, pasta Standalone
 
-## Versão atual: 1.1.7
-Mesma numeração em todos os lugares. **A cada modificação, somar 1 no último dígito** (1.1.7 -> 1.1.8 ...) em: `$script:VersaoApp` no topo do `suporte.ps1` (aparece no título da janela), cabeçalho do `README.md`, nova entrada no `CHANGELOG.md`, este arquivo, a nota do Obsidian e `project_overview.md` na memória.
+## Versão atual: 1.1.9
+Mesma numeração em todos os lugares. **A cada modificação, somar 1 no último dígito** (1.1.9 -> 1.1.10 ...) em: `$script:VersaoApp` no topo do `suporte.ps1` (aparece no título da janela), cabeçalho do `README.md`, nova entrada no `CHANGELOG.md`, este arquivo, a nota do Obsidian e `project_overview.md` na memória.
 
 ## Regras
 - Sempre testar localmente antes de atualizar o script no GitHub (é consumido via `irm | iex` em produção)

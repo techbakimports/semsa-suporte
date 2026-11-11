@@ -1,5 +1,5 @@
 # Versao do script: manter igual no README, CHANGELOG e CLAUDE.md; somar 1 no ultimo digito a cada modificacao
-$script:VersaoApp = "1.1.7"
+$script:VersaoApp = "1.1.9"
 
 # Primeiro, definimos todas as funcoes
 
@@ -636,14 +636,23 @@ function Invoke-PnpUtil {
 
 # Procura um programa de Ferramentas ja instalado: primeiro atalho no Menu Iniciar (nao depende do nome do .exe),
 # depois o .exe nas pastas de programas. Devolve o caminho ou $null.
+# So vale atalho cujo destino e um .exe existente (descarta manual em PDF, desinstalador, site etc.).
 function Find-ProgramaFerramenta {
-    param($Spec)
-    $menus = @("$env:ProgramData\Microsoft\Windows\Start Menu\Programs", "$env:APPDATA\Microsoft\Windows\Start Menu\Programs")
-    foreach ($m in $menus) {
+    param($Spec, [string[]]$Menus)
+    if (-not $Menus) {
+        $Menus = @("$env:ProgramData\Microsoft\Windows\Start Menu\Programs", "$env:APPDATA\Microsoft\Windows\Start Menu\Programs")
+    }
+    $sh = New-Object -ComObject WScript.Shell
+    foreach ($m in $Menus) {
         if (Test-Path $m) {
-            $lnk = Get-ChildItem -Path $m -Recurse -Filter "*$($Spec.Atalho)*.lnk" -File -EA SilentlyContinue |
-                   Where-Object { $_.BaseName -notmatch 'Uninstall|Desinstal|Readme|Help|Ajuda' } | Select-Object -First 1
-            if ($lnk) { return $lnk.FullName }
+            $cands = @(Get-ChildItem -Path $m -Recurse -Filter "*$($Spec.Atalho)*.lnk" -File -EA SilentlyContinue |
+                       Sort-Object @{ Expression = { if ($_.BaseName -eq $Spec.Atalho) { 0 } else { 1 } } }, Name)
+            foreach ($c in $cands) {
+                if ($c.BaseName -match 'Uninstall|Desinstal|Remover|Remove|Readme|Help|Ajuda|Guide|Guia|Manual') { continue }
+                $alvo = ""
+                try { $alvo = $sh.CreateShortcut($c.FullName).TargetPath } catch { $alvo = "" }
+                if ($alvo -match '\.exe$' -and $alvo -notmatch 'unins|uninstall|desinstal' -and (Test-Path $alvo)) { return $c.FullName }
+            }
         }
     }
     foreach ($raiz in @($env:ProgramFiles, ${env:ProgramFiles(x86)}, "$env:LOCALAPPDATA\Programs")) {
@@ -657,12 +666,199 @@ function Find-ProgramaFerramenta {
     return $null
 }
 
+# Acha o winget.exe: PATH, atalho do Instalador de Aplicativo e pasta do pacote. -AddToPath poe a pasta no PATH
+# do processo (para "winget" funcionar logo apos instalar, sem abrir outra janela). Devolve o caminho ou $null.
+function Find-Winget {
+    param([switch]$AddToPath)
+    $p = $null
+    $cmd = Get-Command winget -EA SilentlyContinue
+    if ($cmd) { $p = $cmd.Source }
+    if (-not $p) {
+        $cand = Join-Path $env:LOCALAPPDATA "Microsoft\WindowsApps\winget.exe"
+        if (Test-Path $cand) { $p = $cand }
+    }
+    if (-not $p) {
+        try {
+            $pkg = Get-AppxPackage -Name "Microsoft.DesktopAppInstaller" -EA Stop | Sort-Object Version -Descending | Select-Object -First 1
+            if ($pkg) {
+                $cand = Join-Path $pkg.InstallLocation "winget.exe"
+                if (Test-Path $cand) { $p = $cand }
+            }
+        } catch { }
+    }
+    if ($p -and $AddToPath) {
+        $dir = Split-Path $p -Parent
+        if (($env:Path -split ';') -notcontains $dir) { $env:Path = $env:Path + ";" + $dir }
+    }
+    return $p
+}
+
+function Get-WingetVersao {
+    param([string]$Caminho)
+    try {
+        $v = @(& $Caminho --version 2>$null) | Select-Object -First 1
+        return ([string]$v).Trim().TrimStart('v', 'V')
+    } catch { return "" }
+}
+
+# Acha o choco.exe (PATH ou pasta padrao do Chocolatey). -AddToPath: igual ao Find-Winget.
+function Find-Chocolatey {
+    param([switch]$AddToPath)
+    $p = $null
+    $cmd = Get-Command choco -EA SilentlyContinue
+    if ($cmd) { $p = $cmd.Source }
+    if (-not $p) {
+        foreach ($b in @($env:ChocolateyInstall, (Join-Path $env:ProgramData "chocolatey"))) {
+            if ($b) {
+                $cand = Join-Path $b "bin\choco.exe"
+                if (-not $p -and (Test-Path $cand)) { $p = $cand }
+            }
+        }
+    }
+    if ($p -and $AddToPath) {
+        $dir = Split-Path $p -Parent
+        if (($env:Path -split ';') -notcontains $dir) { $env:Path = $env:Path + ";" + $dir }
+    }
+    return $p
+}
+
+function Get-ChocolateyVersao {
+    param([string]$Caminho)
+    try {
+        $v = @(& $Caminho --version 2>$null) | Where-Object { ([string]$_).Trim() } | Select-Object -First 1
+        return ([string]$v).Trim()
+    } catch { return "" }
+}
+
+# Instala o Chocolatey (script oficial, em um PowerShell filho para a janela nao congelar). Requer Administrador e internet.
+function Install-Chocolatey {
+    param([scriptblock]$OnTick)
+    $res = [pscustomobject]@{ Ok = $false; Mensagem = ""; Saida = ""; Caminho = $null; Versao = "" }
+    $cmd = '$ErrorActionPreference = ''Stop''; [Console]::OutputEncoding = [System.Text.Encoding]::UTF8; ' +
+           '[System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; ' +
+           'Invoke-Expression ((New-Object System.Net.WebClient).DownloadString(''https://chocolatey.org/install.ps1''))'
+    $r = Invoke-ExeAguardando -FilePath "powershell.exe" -Encoding ([System.Text.Encoding]::UTF8) -OnTick $OnTick `
+        -ArgumentList ("-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command `"" + $cmd + "`"")
+    $res.Saida = $r.Output
+    $res.Caminho = Find-Chocolatey -AddToPath
+    if ($res.Caminho) {
+        $res.Ok = $true
+        $res.Versao = Get-ChocolateyVersao $res.Caminho
+    } else {
+        $res.Mensagem = "o instalador terminou (codigo $($r.ExitCode)) mas o choco.exe nao foi encontrado"
+    }
+    return $res
+}
+
+# Instala o winget (Instalador de Aplicativo da Microsoft) para o usuario atual. Requer Administrador e internet.
+# 1) baixa o pacote oficial e as dependencias da release do microsoft/winget-cli e instala com Add-AppxPackage;
+# 2) se falhar, tenta o modulo Microsoft.WinGet.Client (Repair-WinGetPackageManager).
+# Tudo roda em um PowerShell filho (script temporario) para a janela nao congelar.
+function Install-Winget {
+    param([scriptblock]$OnTick)
+    $res = [pscustomobject]@{ Ok = $false; Metodo = ""; Mensagem = ""; Saida = ""; Caminho = $null; Versao = "" }
+    $build = [Environment]::OSVersion.Version.Build
+    if ($build -lt 17763) {
+        $res.Mensagem = "Windows build $build e anterior ao Windows 10 1809 (17763), que e o minimo do winget"
+        return $res
+    }
+    $ja = Find-Winget -AddToPath
+    if ($ja) {
+        $res.Ok = $true; $res.Metodo = "ja instalado"; $res.Caminho = $ja; $res.Versao = Get-WingetVersao $ja
+        return $res
+    }
+
+    $inner = @'
+$ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+[System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
+$tmp = Join-Path $env:TEMP 'SemsaWinget'
+if (Test-Path $tmp) { Remove-Item $tmp -Recurse -Force -EA SilentlyContinue }
+New-Item -ItemType Directory -Path $tmp -Force | Out-Null
+try {
+    Write-Output 'METODO: download direto (GitHub microsoft/winget-cli)'
+    $base = 'https://github.com/microsoft/winget-cli/releases/latest/download/'
+    $bundle = Join-Path $tmp 'Microsoft.DesktopAppInstaller.msixbundle'
+    $depZip = Join-Path $tmp 'Dependencies.zip'
+    Write-Output 'Baixando o pacote do winget...'
+    Invoke-WebRequest -Uri ($base + 'Microsoft.DesktopAppInstaller_8wekyb3d8bbwe.msixbundle') -OutFile $bundle -UseBasicParsing
+    $sig = Get-AuthenticodeSignature -FilePath $bundle
+    if ($sig.SignerCertificate) {
+        if ($sig.Status -ne 'Valid' -or $sig.SignerCertificate.Subject -notmatch 'Microsoft') {
+            throw "assinatura do pacote invalida ($($sig.Status))"
+        }
+        Write-Output 'Assinatura digital da Microsoft conferida.'
+    }
+    $instalou = $false
+    $temDeps = (Get-AppxPackage -Name 'Microsoft.VCLibs.140.00.UWPDesktop' -EA SilentlyContinue) -and (Get-AppxPackage -Name 'Microsoft.UI.Xaml.2.8' -EA SilentlyContinue)
+    if ($temDeps) {
+        try {
+            Write-Output 'Instalando o winget (dependencias ja presentes)...'
+            Add-AppxPackage -Path $bundle
+            $instalou = $true
+        } catch {
+            Write-Output ('Instalacao sem baixar dependencias falhou: ' + $_.Exception.Message)
+        }
+    }
+    if (-not $instalou) {
+        Write-Output 'Baixando as dependencias...'
+        Invoke-WebRequest -Uri ($base + 'DesktopAppInstaller_Dependencies.zip') -OutFile $depZip -UseBasicParsing
+        Expand-Archive -Path $depZip -DestinationPath (Join-Path $tmp 'dep') -Force
+        $a = $env:PROCESSOR_ARCHITEW6432
+        if (-not $a) { $a = $env:PROCESSOR_ARCHITECTURE }
+        $arq = 'x64'
+        if ($a -eq 'ARM64') { $arq = 'arm64' } elseif ($a -eq 'x86') { $arq = 'x86' }
+        $pasta = Get-ChildItem -Path (Join-Path $tmp 'dep') -Directory -Recurse | Where-Object { $_.Name -eq $arq } | Select-Object -First 1
+        if (-not $pasta) { throw "dependencias para $arq nao encontradas no pacote" }
+        $deps = @(Get-ChildItem -Path $pasta.FullName -Filter '*.appx' -File | ForEach-Object { $_.FullName })
+        Write-Output 'Instalando o winget...'
+        Add-AppxPackage -Path $bundle -DependencyPath $deps
+    }
+    Write-Output 'OK: winget instalado.'
+} catch {
+    Write-Output ('Falha no download direto: ' + $_.Exception.Message)
+    try {
+        Write-Output 'METODO: modulo Microsoft.WinGet.Client'
+        Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force -Scope AllUsers | Out-Null
+        Install-Module -Name Microsoft.WinGet.Client -Force -Scope AllUsers -Repository PSGallery
+        Import-Module Microsoft.WinGet.Client
+        Repair-WinGetPackageManager -Latest -Force -AllUsers
+        Write-Output 'OK: winget instalado pelo modulo.'
+    } catch {
+        Write-Output ('ERRO: ' + $_.Exception.Message)
+        exit 1
+    }
+}
+exit 0
+'@
+    $tmpPs1 = Join-Path $env:TEMP "SemsaSuporte_instalar_winget.ps1"
+    try {
+        Set-Content -Path $tmpPs1 -Value $inner -Encoding ASCII
+        $r = Invoke-ExeAguardando -FilePath "powershell.exe" -Encoding ([System.Text.Encoding]::UTF8) -OnTick $OnTick `
+            -ArgumentList "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$tmpPs1`""
+    } finally {
+        Remove-Item $tmpPs1 -EA SilentlyContinue
+    }
+    $res.Saida = $r.Output
+    $m = [regex]::Matches($r.Output, 'METODO: ([^\r\n]+)')
+    if ($m.Count -gt 0) { $res.Metodo = $m[$m.Count - 1].Groups[1].Value.Trim() }
+    $res.Caminho = Find-Winget -AddToPath
+    if ($res.Caminho) {
+        $res.Ok = $true
+        $res.Versao = Get-WingetVersao $res.Caminho
+    } else {
+        $res.Mensagem = "a instalacao terminou (codigo $($r.ExitCode)) mas o winget nao foi encontrado"
+    }
+    return $res
+}
+
 # Instala um programa de Ferramentas: winget (principal); se o winget nao existir, Chocolatey apenas para os
 # programas que tem ChocoId (o Chocolatey e instalado antes se faltar). Requer Administrador.
 function Install-ProgramaFerramenta {
     param($Spec, [scriptblock]$OnTick)
     $res = [pscustomobject]@{ Ok = $false; Metodo = ""; Codigo = $null; Reinicio = $false; Mensagem = "" }
-    if (Get-Command winget -EA SilentlyContinue) {
+    if (Find-Winget -AddToPath) {
         $res.Metodo = "winget"
         $r = Invoke-ExeAguardando -FilePath "winget" -Encoding ([System.Text.Encoding]::UTF8) -OnTick $OnTick `
             -ArgumentList "install --exact --source winget --id $($Spec.WingetId) --silent --disable-interactivity --accept-package-agreements --accept-source-agreements"
@@ -674,14 +870,10 @@ function Install-ProgramaFerramenta {
     } elseif ($Spec.ChocoId) {
         $res.Metodo = "chocolatey"
         try {
-            if (-not (Get-Command choco -EA SilentlyContinue)) {
-                Set-ExecutionPolicy Bypass -Scope Process -Force
-                [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
-                Invoke-Expression ((New-Object System.Net.WebClient).DownloadString('https://chocolatey.org/install.ps1'))
-                $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" +
-                            [System.Environment]::GetEnvironmentVariable("Path","User")
+            if (-not (Find-Chocolatey -AddToPath)) {
+                $ic = Install-Chocolatey -OnTick $OnTick
+                if (-not $ic.Ok) { throw "falha ao instalar o Chocolatey: $($ic.Mensagem)" }
             }
-            if (-not (Get-Command choco -EA SilentlyContinue)) { throw "choco nao reconhecido apos a instalacao do Chocolatey" }
             $r = Invoke-ExeAguardando -FilePath "choco" -OnTick $OnTick -ArgumentList "install $($Spec.ChocoId) -y --no-progress"
             $res.Codigo = $r.ExitCode
             if ($r.ExitCode -eq 0) { $res.Ok = $true }
@@ -689,7 +881,7 @@ function Install-ProgramaFerramenta {
             else { $res.Mensagem = "choco retornou o codigo $($r.ExitCode)" }
         } catch { $res.Mensagem = $_.Exception.Message }
     } else {
-        $res.Mensagem = "winget nao encontrado (requer Windows 10 1809+/11 com 'Instalador de Aplicativo') e este programa nao tem pacote Chocolatey confiavel"
+        $res.Mensagem = "winget nao encontrado (instale em Ferramentas > Gerenciadores de pacotes; requer Windows 10 1809+/11) e este programa nao tem pacote Chocolatey confiavel"
     }
     return $res
 }
@@ -1669,6 +1861,34 @@ function Show-PadronizacaoGUI {
         $bImp.Add_Click({ $script:ferramentaEscolhida = "drivers-importar"; $dlg.DialogResult = "OK"; $dlg.Close() })
         $pos.Y += 40
 
+        # --- GERENCIADORES DE PACOTES (winget e Chocolatey) ---
+        $wgPath = Find-Winget -AddToPath
+        $wgVer = ""
+        if ($wgPath) { $wgVer = Get-WingetVersao $wgPath }
+        $chPath = Find-Chocolatey -AddToPath
+        $chVer = ""
+        if ($chPath) { $chVer = Get-ChocolateyVersao $chPath }
+        $txtWg = "Instalar Winget"
+        $tagWg = "winget-instalar"
+        if ($wgPath) {
+            $tagWg = "winget-info"
+            if ($wgVer) { $txtWg = "Winget v$wgVer" } else { $txtWg = "Winget (instalado)" }
+        }
+        $txtCh = "Instalar Chocolatey"
+        $tagCh = "choco-instalar"
+        if ($chPath) {
+            $tagCh = "choco-info"
+            if ($chVer) { $txtCh = "Chocolatey $chVer" } else { $txtCh = "Chocolatey (instalado)" }
+        }
+        & $addSec "GERENCIADORES DE PACOTES" "Instalam os programas. Se ja estiver instalado, mostra a versao; senao, instala (requer Administrador e internet)." 44
+        $bWg = & $addBtnF $txtWg 10 $pos.Y 155 $corBotao
+        $bWg.Tag = $tagWg
+        $bWg.Add_Click({ $script:ferramentaEscolhida = [string]$this.Tag; $dlg.DialogResult = "OK"; $dlg.Close() })
+        $bCh = & $addBtnF $txtCh 175 $pos.Y 155 $corBotao
+        $bCh.Tag = $tagCh
+        $bCh.Add_Click({ $script:ferramentaEscolhida = [string]$this.Tag; $dlg.DialogResult = "OK"; $dlg.Close() })
+        $pos.Y += 40
+
         # --- PROGRAMAS ---
         & $addSec "PROGRAMAS" "Abre o programa; se nao estiver instalado, oferece instalar pelo winget. Instalar requer Administrador." 30
         foreach ($f in $listFerramentas) {
@@ -1726,6 +1946,76 @@ function Show-PadronizacaoGUI {
                     & $log "  [ERRO] Exportacao falhou (codigo $($r.ExitCode); $($r.Pacotes) pacotes gerados)." $corErro
                     foreach ($linha in ($r.Saida -split "[\r\n]+" | Where-Object { $_.Trim() } | Select-Object -Last 5)) { & $log "         $($linha.Trim())" $corTexto }
                 }
+            } catch { & $log "  [ERRO] $($_.Exception.Message)" $corErro }
+            $lblProgresso.Text = ""
+            $form.Cursor = [System.Windows.Forms.Cursors]::Default
+            $btnIniciar.Enabled = $true
+            $botoesLaterais | ForEach-Object { $_.Enabled = $true }
+        }
+        elseif ($escolha -eq "winget-info" -or $escolha -eq "choco-info") {
+            $ehWg = ($escolha -eq "winget-info")
+            $nomeG = "Chocolatey"
+            if ($ehWg) { $nomeG = "Winget" }
+            & $sepLog $nomeG.ToUpper()
+            $cam = $null
+            $ver = ""
+            if ($ehWg) {
+                $cam = Find-Winget -AddToPath
+                if ($cam) { $ver = Get-WingetVersao $cam }
+            } else {
+                $cam = Find-Chocolatey -AddToPath
+                if ($cam) { $ver = Get-ChocolateyVersao $cam }
+            }
+            if ($cam) {
+                & $log "  [OK] $nomeG instalado. Versao: $(if ($ver) { $ver } else { 'nao identificada' })" $corOk
+                & $log "       Caminho: $cam" $corTexto
+            } else {
+                & $log "  [AVISO] $nomeG nao encontrado." $corAviso
+            }
+        }
+        elseif ($escolha -eq "winget-instalar" -or $escolha -eq "choco-instalar") {
+            $ehWg = ($escolha -eq "winget-instalar")
+            $nomeG = "Chocolatey"
+            $detalhe = "Sera baixado o instalador oficial de chocolatey.org."
+            if ($ehWg) {
+                $nomeG = "Winget"
+                $detalhe = "Sera baixado o pacote oficial da Microsoft (GitHub) e as dependencias, e instalado para o usuario atual."
+            }
+            & $sepLog ("INSTALAR " + $nomeG.ToUpper())
+            if (-not $souAdmin) {
+                & $log "  [ERRO] Execute o script como Administrador para instalar o $nomeG." $corErro
+                return
+            }
+            $resp = [System.Windows.Forms.MessageBox]::Show(
+                "$nomeG nao esta instalado neste computador.`n`nInstalar agora?`n$detalhe`nPrecisa de internet e pode levar varios minutos.",
+                "Instalar $nomeG",
+                [System.Windows.Forms.MessageBoxButtons]::YesNo,
+                [System.Windows.Forms.MessageBoxIcon]::Question
+            )
+            if ($resp -ne [System.Windows.Forms.DialogResult]::Yes) {
+                & $log "  [AVISO] Instalacao cancelada." $corAviso
+                return
+            }
+            $botoesLaterais | ForEach-Object { $_.Enabled = $false }
+            $btnIniciar.Enabled = $false
+            $form.Cursor = [System.Windows.Forms.Cursors]::WaitCursor
+            & $log "  [INFO] Instalando $nomeG..." $corInfo
+            & $log "         Pode levar alguns minutos." $corTexto
+            try {
+                if ($ehWg) { $r = Install-Winget -OnTick $tick } else { $r = Install-Chocolatey -OnTick $tick }
+                $logArq = Join-Path $env:TEMP ("SemsaSuporte_{0}_{1}.log" -f $nomeG.ToLower(), (Get-Date -Format 'yyyyMMdd_HHmmss'))
+                Set-Content -Path $logArq -Value $r.Saida -Encoding UTF8 -EA SilentlyContinue
+                if ($r.Ok) {
+                    $metodoTxt = ""
+                    if ($ehWg -and $r.Metodo) { $metodoTxt = " ($($r.Metodo))" }
+                    & $log "  [OK] $nomeG instalado$metodoTxt. Versao: $(if ($r.Versao) { $r.Versao } else { 'nao identificada' })" $corOk
+                    & $log "       Caminho: $($r.Caminho)" $corTexto
+                    if ($ehWg) { & $log "       Para usar o 'winget' em outras janelas, abra um novo terminal." $corTexto }
+                } else {
+                    & $log "  [ERRO] Falha ao instalar o ${nomeG}: $($r.Mensagem)" $corErro
+                    foreach ($linha in ($r.Saida -split "[\r\n]+" | Where-Object { $_.Trim() } | Select-Object -Last 6)) { & $log "         $($linha.Trim())" $corTexto }
+                }
+                & $log "       Detalhes: $logArq" $corTexto
             } catch { & $log "  [ERRO] $($_.Exception.Message)" $corErro }
             $lblProgresso.Text = ""
             $form.Cursor = [System.Windows.Forms.Cursors]::Default

@@ -2,6 +2,22 @@
 
 Todas as alterações notáveis neste projeto serão documentadas neste arquivo.
 
+## [1.1.9] - 2026-11-11
+
+### Adicionado
+- **Ferramentas > Gerenciadores de pacotes:** botões **Winget** e **Chocolatey**. Se o gerenciador já está instalado, o botão mostra a versão (e o clique mostra versão e caminho no log); se não está, mostra `Instalar ...` e instala com confirmação (exige Administrador e internet)
+- Funções `Find-Winget`, `Get-WingetVersao`, `Install-Winget`, `Find-Chocolatey`, `Get-ChocolateyVersao` e `Install-Chocolatey`
+- Instalação do winget: baixa o pacote oficial do GitHub `microsoft/winget-cli`, confere a assinatura da Microsoft e instala com `Add-AppxPackage`; só baixa as dependências (VCLibs e UI.Xaml) se o PC não as tiver; se falhar, tenta o módulo `Microsoft.WinGet.Client`. Roda em um PowerShell filho, com a janela responsiva e log em `%TEMP%`
+
+### Alterado
+- `Install-ProgramaFerramenta` usa `Find-Winget` (acha o winget mesmo fora do PATH) e `Install-Chocolatey` (antes o bootstrap rodava no processo da janela, que congelava durante a instalação)
+- A mensagem de "winget não encontrado" em Ferramentas > Programas aponta para Ferramentas > Gerenciadores de pacotes
+
+## [1.1.8] - 2026-11-11
+
+### Corrigido
+- **Ferramentas > Programas:** com o Transwiz instalado, o botão abria o **manual em PDF** em vez do programa. A busca pegava o primeiro atalho do Menu Iniciar com o nome do programa, e o instalador do Transwiz cria também um atalho para o "User Guide". Agora só vale atalho cujo destino é um `.exe` existente (lido do próprio atalho), são ignorados atalhos de desinstalador, ajuda, guia e manual, e o atalho de nome exato tem prioridade
+
 ## [1.1.7] - 2026-11-11
 
 ### Adicionado
