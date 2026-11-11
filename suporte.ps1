@@ -1,5 +1,5 @@
 # Versao do script: manter igual no README, CHANGELOG e CLAUDE.md; somar 1 no ultimo digito a cada modificacao
-$script:VersaoApp = "1.1.6"
+$script:VersaoApp = "1.1.7"
 
 # Primeiro, definimos todas as funcoes
 
@@ -595,21 +595,19 @@ function Test-ComputerName {
 
 # Executa o pnputil.exe (de 64 bits, mesmo em PowerShell 32 bits) e devolve codigo de saida + texto.
 # -OnTick recebe o tempo decorrido (mm:ss) a cada ciclo, para a GUI atualizar o rotulo sem congelar.
-function Invoke-PnpUtil {
-    param([string]$ArgumentList, [scriptblock]$OnTick)
-    $pnp = Join-Path $env:SystemRoot "System32\pnputil.exe"
-    if ([Environment]::Is64BitOperatingSystem -and -not [Environment]::Is64BitProcess) {
-        $pnp = Join-Path $env:SystemRoot "Sysnative\pnputil.exe"
+function Invoke-ExeAguardando {
+    param([string]$FilePath, [string]$ArgumentList, [scriptblock]$OnTick, [System.Text.Encoding]$Encoding)
+    # com a saida redirecionada o pnputil escreve em ANSI (1252 no pt-BR), nao em OEM; o winget escreve em UTF-8
+    if (-not $Encoding) {
+        $Encoding = [System.Text.Encoding]::GetEncoding([System.Globalization.CultureInfo]::CurrentCulture.TextInfo.ANSICodePage)
     }
-    if (-not (Test-Path $pnp)) { throw "pnputil.exe nao encontrado em $pnp" }
-
     $tmpOut = [System.IO.Path]::GetTempFileName()
     $tmpErr = [System.IO.Path]::GetTempFileName()
     $exitCode = $null
     $saida = ""
     $cron = [System.Diagnostics.Stopwatch]::StartNew()
     try {
-        $proc = Start-Process -FilePath $pnp -ArgumentList $ArgumentList `
+        $proc = Start-Process -FilePath $FilePath -ArgumentList $ArgumentList `
             -RedirectStandardOutput $tmpOut -RedirectStandardError $tmpErr -NoNewWindow -PassThru
         $null = $proc.Handle
         while (-not $proc.HasExited) {
@@ -619,13 +617,81 @@ function Invoke-PnpUtil {
         }
         $proc.WaitForExit()
         $exitCode = [int]$proc.ExitCode
-        # com a saida redirecionada o pnputil escreve em ANSI (1252 no pt-BR), nao em OEM
-        $ansi = [System.Text.Encoding]::GetEncoding([System.Globalization.CultureInfo]::CurrentCulture.TextInfo.ANSICodePage)
-        $saida = [System.IO.File]::ReadAllText($tmpOut, $ansi) + [System.IO.File]::ReadAllText($tmpErr, $ansi)
+        $saida = [System.IO.File]::ReadAllText($tmpOut, $Encoding) + [System.IO.File]::ReadAllText($tmpErr, $Encoding)
     } finally {
         Remove-Item $tmpOut, $tmpErr -EA SilentlyContinue
     }
     return [pscustomobject]@{ ExitCode = $exitCode; Output = $saida }
+}
+
+function Invoke-PnpUtil {
+    param([string]$ArgumentList, [scriptblock]$OnTick)
+    $pnp = Join-Path $env:SystemRoot "System32\pnputil.exe"
+    if ([Environment]::Is64BitOperatingSystem -and -not [Environment]::Is64BitProcess) {
+        $pnp = Join-Path $env:SystemRoot "Sysnative\pnputil.exe"
+    }
+    if (-not (Test-Path $pnp)) { throw "pnputil.exe nao encontrado em $pnp" }
+    return Invoke-ExeAguardando -FilePath $pnp -ArgumentList $ArgumentList -OnTick $OnTick
+}
+
+# Procura um programa de Ferramentas ja instalado: primeiro atalho no Menu Iniciar (nao depende do nome do .exe),
+# depois o .exe nas pastas de programas. Devolve o caminho ou $null.
+function Find-ProgramaFerramenta {
+    param($Spec)
+    $menus = @("$env:ProgramData\Microsoft\Windows\Start Menu\Programs", "$env:APPDATA\Microsoft\Windows\Start Menu\Programs")
+    foreach ($m in $menus) {
+        if (Test-Path $m) {
+            $lnk = Get-ChildItem -Path $m -Recurse -Filter "*$($Spec.Atalho)*.lnk" -File -EA SilentlyContinue |
+                   Where-Object { $_.BaseName -notmatch 'Uninstall|Desinstal|Readme|Help|Ajuda' } | Select-Object -First 1
+            if ($lnk) { return $lnk.FullName }
+        }
+    }
+    foreach ($raiz in @($env:ProgramFiles, ${env:ProgramFiles(x86)}, "$env:LOCALAPPDATA\Programs")) {
+        if ($raiz -and (Test-Path $raiz)) {
+            foreach ($exe in $Spec.Exes) {
+                $achou = Get-ChildItem -Path $raiz -Recurse -Depth 3 -Filter $exe -File -EA SilentlyContinue | Select-Object -First 1
+                if ($achou) { return $achou.FullName }
+            }
+        }
+    }
+    return $null
+}
+
+# Instala um programa de Ferramentas: winget (principal); se o winget nao existir, Chocolatey apenas para os
+# programas que tem ChocoId (o Chocolatey e instalado antes se faltar). Requer Administrador.
+function Install-ProgramaFerramenta {
+    param($Spec, [scriptblock]$OnTick)
+    $res = [pscustomobject]@{ Ok = $false; Metodo = ""; Codigo = $null; Reinicio = $false; Mensagem = "" }
+    if (Get-Command winget -EA SilentlyContinue) {
+        $res.Metodo = "winget"
+        $r = Invoke-ExeAguardando -FilePath "winget" -Encoding ([System.Text.Encoding]::UTF8) -OnTick $OnTick `
+            -ArgumentList "install --exact --source winget --id $($Spec.WingetId) --silent --disable-interactivity --accept-package-agreements --accept-source-agreements"
+        $res.Codigo = $r.ExitCode
+        # 0x8A15002B e 0x8A150061 = ja instalado; 0x8A150109 = reinicio necessario
+        if ($r.ExitCode -eq 0 -or $r.ExitCode -eq -1978335189 -or $r.ExitCode -eq -1978335135) { $res.Ok = $true }
+        elseif ($r.ExitCode -eq -1978334967) { $res.Ok = $true; $res.Reinicio = $true }
+        else { $res.Mensagem = ("winget retornou o codigo {0} (0x{1:X8})" -f $r.ExitCode, $r.ExitCode) }
+    } elseif ($Spec.ChocoId) {
+        $res.Metodo = "chocolatey"
+        try {
+            if (-not (Get-Command choco -EA SilentlyContinue)) {
+                Set-ExecutionPolicy Bypass -Scope Process -Force
+                [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
+                Invoke-Expression ((New-Object System.Net.WebClient).DownloadString('https://chocolatey.org/install.ps1'))
+                $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" +
+                            [System.Environment]::GetEnvironmentVariable("Path","User")
+            }
+            if (-not (Get-Command choco -EA SilentlyContinue)) { throw "choco nao reconhecido apos a instalacao do Chocolatey" }
+            $r = Invoke-ExeAguardando -FilePath "choco" -OnTick $OnTick -ArgumentList "install $($Spec.ChocoId) -y --no-progress"
+            $res.Codigo = $r.ExitCode
+            if ($r.ExitCode -eq 0) { $res.Ok = $true }
+            elseif ($r.ExitCode -eq 1641 -or $r.ExitCode -eq 3010) { $res.Ok = $true; $res.Reinicio = $true }
+            else { $res.Mensagem = "choco retornou o codigo $($r.ExitCode)" }
+        } catch { $res.Mensagem = $_.Exception.Message }
+    } else {
+        $res.Mensagem = "winget nao encontrado (requer Windows 10 1809+/11 com 'Instalador de Aplicativo') e este programa nao tem pacote Chocolatey confiavel"
+    }
+    return $res
 }
 
 # Exporta todos os drivers de terceiros do repositorio de drivers para <PastaBase>\Drivers_<PC>_<data>.
@@ -1545,33 +1611,46 @@ function Show-PadronizacaoGUI {
         }
     })
 
+    # Programas da janela Ferramentas: para somar um programa, basta acrescentar uma linha aqui.
+    # Atalho = parte do nome do atalho no Menu Iniciar; Exes = nomes do executavel (busca de reserva);
+    # ChocoId = $null quando nao ha pacote Chocolatey confiavel (entao so o winget instala).
+    # Desc = descricao curta mostrada abaixo do botao.
+    $listFerramentas = @(
+        @{ Key = "wiztree";  Nome = "WizTree";  WingetId = "AntibodySoftware.WizTree"; ChocoId = "wiztree"; Atalho = "WizTree";  Exes = @("WizTree64.exe", "WizTree.exe")
+           Desc = "Analisador de espaco em disco: mostra de forma visual e muito rapida quais pastas e arquivos ocupam mais espaco no HD/SSD." },
+        @{ Key = "transwiz"; Nome = "Transwiz"; WingetId = "ForensiT.Transwiz";        ChocoId = $null;     Atalho = "Transwiz"; Exes = @("Transwiz.exe")
+           Desc = "Migracao de perfil de usuario: empacota arquivos e configuracoes em um zip no PC de origem e restaura no PC de destino." }
+    )
+
     # Janela secundaria "Ferramentas": cada ferramenta e um botao que devolve a escolha em
     # $script:ferramentaEscolhida; a execucao acontece depois, usando o log da janela principal.
     $btnFerramentas.Add_Click({
         $script:ferramentaEscolhida = $null
         $dlg = New-Object System.Windows.Forms.Form
         $dlg.Text = "Ferramentas"
-        $dlg.Size = New-Object System.Drawing.Size(360, 320)
         $dlg.StartPosition = "CenterParent"
         $dlg.BackColor = $corFundo; $dlg.ForeColor = $corTexto
         $dlg.FormBorderStyle = "FixedDialog"
         $dlg.MaximizeBox = $false; $dlg.MinimizeBox = $false
 
-        $lblSec = New-Object System.Windows.Forms.Label
-        $lblSec.Text = "DRIVERS"
-        $lblSec.Font = New-Object System.Drawing.Font("Consolas", 8, [System.Drawing.FontStyle]::Bold)
-        $lblSec.ForeColor = $corDestaque
-        $lblSec.Location = New-Object System.Drawing.Point(10, 12)
-        $lblSec.Size = New-Object System.Drawing.Size(320, 14)
-        $dlg.Controls.Add($lblSec)
-
-        $lblDesc = New-Object System.Windows.Forms.Label
-        $lblDesc.Text = "Backup e restauracao dos drivers de terceiros do Windows. Importar requer Administrador."
-        $lblDesc.Font = New-Object System.Drawing.Font("Consolas", 8)
-        $lblDesc.Location = New-Object System.Drawing.Point(10, 30)
-        $lblDesc.Size = New-Object System.Drawing.Size(320, 30)
-        $dlg.Controls.Add($lblDesc)
-
+        $pos = @{ Y = 12 }
+        $addSec = { param([string]$titulo, [string]$desc, [int]$altDesc)
+            $l = New-Object System.Windows.Forms.Label
+            $l.Text = $titulo
+            $l.Font = New-Object System.Drawing.Font("Consolas", 8, [System.Drawing.FontStyle]::Bold)
+            $l.ForeColor = $corDestaque
+            $l.Location = New-Object System.Drawing.Point(10, $pos.Y)
+            $l.Size = New-Object System.Drawing.Size(320, 14)
+            $dlg.Controls.Add($l)
+            $pos.Y += 18
+            $d = New-Object System.Windows.Forms.Label
+            $d.Text = $desc
+            $d.Font = New-Object System.Drawing.Font("Consolas", 8)
+            $d.Location = New-Object System.Drawing.Point(10, $pos.Y)
+            $d.Size = New-Object System.Drawing.Size(320, $altDesc)
+            $dlg.Controls.Add($d)
+            $pos.Y += $altDesc + 6
+        }
         $addBtnF = { param([string]$t, [int]$x, [int]$y, [int]$w, $cor)
             $b = New-Object System.Windows.Forms.Button
             $b.Text = $t; $b.Location = New-Object System.Drawing.Point($x, $y)
@@ -1581,43 +1660,51 @@ function Show-PadronizacaoGUI {
             $dlg.Controls.Add($b); return $b
         }
 
-        $bExp = & $addBtnF "Exportar drivers (backup)" 10 66 320 $corBotao
+        # --- DRIVERS ---
+        & $addSec "DRIVERS" "Backup e restauracao dos drivers de terceiros do Windows. Importar requer Administrador." 30
+        $bExp = & $addBtnF "Exportar drivers (backup)" 10 $pos.Y 320 $corBotao
         $bExp.Add_Click({ $script:ferramentaEscolhida = "drivers-exportar"; $dlg.DialogResult = "OK"; $dlg.Close() })
-
-        $bImp = & $addBtnF "Importar drivers (restaurar)" 10 98 320 $corBotao
+        $pos.Y += 32
+        $bImp = & $addBtnF "Importar drivers (restaurar)" 10 $pos.Y 320 $corBotao
         $bImp.Add_Click({ $script:ferramentaEscolhida = "drivers-importar"; $dlg.DialogResult = "OK"; $dlg.Close() })
+        $pos.Y += 40
 
-        $lblSec2 = New-Object System.Windows.Forms.Label
-        $lblSec2.Text = "REGISTRO REMOTO"
-        $lblSec2.Font = New-Object System.Drawing.Font("Consolas", 8, [System.Drawing.FontStyle]::Bold)
-        $lblSec2.ForeColor = $corDestaque
-        $lblSec2.Location = New-Object System.Drawing.Point(10, 140)
-        $lblSec2.Size = New-Object System.Drawing.Size(320, 14)
-        $dlg.Controls.Add($lblSec2)
+        # --- PROGRAMAS ---
+        & $addSec "PROGRAMAS" "Abre o programa; se nao estiver instalado, oferece instalar pelo winget. Instalar requer Administrador." 30
+        foreach ($f in $listFerramentas) {
+            $bP = & $addBtnF $f.Nome 10 $pos.Y 320 $corBotao
+            $bP.Tag = $f.Key
+            $bP.Add_Click({ $script:ferramentaEscolhida = "prog-" + $this.Tag; $dlg.DialogResult = "OK"; $dlg.Close() })
+            $pos.Y += 29
+            $dP = New-Object System.Windows.Forms.Label
+            $dP.Text = $f.Desc
+            $dP.Font = New-Object System.Drawing.Font("Consolas", 8)
+            $dP.Location = New-Object System.Drawing.Point(10, $pos.Y)
+            $dP.Size = New-Object System.Drawing.Size(320, 42)
+            $dlg.Controls.Add($dP)
+            $pos.Y += 46
+        }
+        $pos.Y += 4
 
-        $lblDesc2 = New-Object System.Windows.Forms.Label
-        $lblDesc2.Text = "Servico RemoteRegistry (acesso ao registro pela rede). Nao e necessario para o RDP; habilite so se alguma ferramenta precisar. Requer Administrador."
-        $lblDesc2.Font = New-Object System.Drawing.Font("Consolas", 8)
-        $lblDesc2.Location = New-Object System.Drawing.Point(10, 158)
-        $lblDesc2.Size = New-Object System.Drawing.Size(320, 44)
-        $dlg.Controls.Add($lblDesc2)
-
-        $bRegOn = & $addBtnF "Habilitar" 10 206 155 $corBotao
+        # --- REGISTRO REMOTO ---
+        & $addSec "REGISTRO REMOTO" "Servico RemoteRegistry (acesso ao registro pela rede). Nao e necessario para o RDP; habilite so se alguma ferramenta precisar. Requer Administrador." 44
+        $bRegOn = & $addBtnF "Habilitar" 10 $pos.Y 155 $corBotao
         $bRegOn.Add_Click({ $script:ferramentaEscolhida = "regremoto-habilitar"; $dlg.DialogResult = "OK"; $dlg.Close() })
-
-        $bRegOff = & $addBtnF "Desabilitar" 175 206 155 $corBotao
+        $bRegOff = & $addBtnF "Desabilitar" 175 $pos.Y 155 $corBotao
         $bRegOff.Add_Click({ $script:ferramentaEscolhida = "regremoto-desabilitar"; $dlg.DialogResult = "OK"; $dlg.Close() })
+        $pos.Y += 40
 
-        $bFec = & $addBtnF "Fechar" 125 246 90 ([System.Drawing.Color]::FromArgb(80, 80, 80))
+        $bFec = & $addBtnF "Fechar" 125 $pos.Y 90 ([System.Drawing.Color]::FromArgb(80, 80, 80))
         $bFec.Add_Click({ $dlg.DialogResult = "Cancel"; $dlg.Close() })
         $dlg.CancelButton = $bFec
+        $dlg.ClientSize = New-Object System.Drawing.Size(340, ($pos.Y + 38))
 
         [void]$dlg.ShowDialog($form)
         $escolha = $script:ferramentaEscolhida
         if (-not $escolha) { return }
 
         $souAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-        $tick = { param([string]$t) $lblProgresso.Text = "Drivers`naguarde... ($t)" }
+        $tick = { param([string]$t) $lblProgresso.Text = "Aguarde...`n($t)" }
 
         if ($escolha -eq "drivers-exportar") {
             $fd = New-Object System.Windows.Forms.FolderBrowserDialog
@@ -1644,6 +1731,60 @@ function Show-PadronizacaoGUI {
             $form.Cursor = [System.Windows.Forms.Cursors]::Default
             $btnIniciar.Enabled = $true
             $botoesLaterais | ForEach-Object { $_.Enabled = $true }
+        }
+        elseif ($escolha -like "prog-*") {
+            $spec = $listFerramentas | Where-Object { "prog-$($_.Key)" -eq $escolha } | Select-Object -First 1
+            if (-not $spec) { return }
+            & $sepLog $spec.Nome.ToUpper()
+            $alvo = Find-ProgramaFerramenta -Spec $spec
+            $instalou = $false
+            if (-not $alvo) {
+                if (-not $souAdmin) {
+                    & $log "  [ERRO] $($spec.Nome) nao esta instalado. Execute o script como Administrador para instalar." $corErro
+                    return
+                }
+                $resp = [System.Windows.Forms.MessageBox]::Show(
+                    "$($spec.Nome) nao esta instalado neste computador.`n`nInstalar agora?`n(winget: $($spec.WingetId))",
+                    "Instalar $($spec.Nome)",
+                    [System.Windows.Forms.MessageBoxButtons]::YesNo,
+                    [System.Windows.Forms.MessageBoxIcon]::Question
+                )
+                if ($resp -ne [System.Windows.Forms.DialogResult]::Yes) {
+                    & $log "  [AVISO] Instalacao cancelada." $corAviso
+                    return
+                }
+                $botoesLaterais | ForEach-Object { $_.Enabled = $false }
+                $btnIniciar.Enabled = $false
+                $form.Cursor = [System.Windows.Forms.Cursors]::WaitCursor
+                & $log "  [INFO] Instalando $($spec.Nome)..." $corInfo
+                & $log "         Pode levar alguns minutos." $corTexto
+                try {
+                    $r = Install-ProgramaFerramenta -Spec $spec -OnTick $tick
+                    if ($r.Ok) {
+                        $instalou = $true
+                        & $log "  [OK] $($spec.Nome) instalado via $($r.Metodo)." $corOk
+                        if ($r.Reinicio) {
+                            $script:guiNeedsRestart = $true
+                            & $log "  [AVISO] Reinicio necessario para concluir a instalacao." $corAviso
+                        }
+                        $alvo = Find-ProgramaFerramenta -Spec $spec
+                    } else {
+                        & $log "  [ERRO] Falha ao instalar $($spec.Nome): $($r.Mensagem)" $corErro
+                    }
+                } catch { & $log "  [ERRO] $($_.Exception.Message)" $corErro }
+                $lblProgresso.Text = ""
+                $form.Cursor = [System.Windows.Forms.Cursors]::Default
+                $btnIniciar.Enabled = $true
+                $botoesLaterais | ForEach-Object { $_.Enabled = $true }
+            }
+            if ($alvo) {
+                try {
+                    Start-Process -FilePath $alvo
+                    & $log "  [OK] Abrindo $($spec.Nome): $alvo" $corOk
+                } catch { & $log "  [ERRO] Nao foi possivel abrir ${alvo}: $($_.Exception.Message)" $corErro }
+            } elseif ($instalou) {
+                & $log "  [AVISO] Instalado, mas o atalho/executavel nao foi localizado. Abra pelo Menu Iniciar." $corAviso
+            }
         }
         elseif ($escolha -eq "regremoto-habilitar" -or $escolha -eq "regremoto-desabilitar") {
             $ligar = ($escolha -eq "regremoto-habilitar")

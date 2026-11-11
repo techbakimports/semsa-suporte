@@ -2,6 +2,17 @@
 
 Todas as alterações notáveis neste projeto serão documentadas neste arquivo.
 
+## [1.1.7] - 2026-11-11
+
+### Adicionado
+- **Ferramentas > Programas**: botões **WizTree** e **Transwiz**. Abre o programa se já estiver instalado; senão pergunta e instala **pelo winget** (exige Administrador). Sem winget, o WizTree cai no Chocolatey (instalado antes se faltar); o Transwiz não tem fallback (o pacote do Chocolatey está desatualizado e quebrado) e o script avisa
+- Descrição curta de cada programa abaixo do botão (campo `Desc` da tabela)
+- Funções `Find-ProgramaFerramenta` (atalho do Menu Iniciar, depois `.exe`) e `Install-ProgramaFerramenta`; tabela `$listFerramentas` (uma linha por programa)
+
+### Alterado
+- Executor de processos genérico `Invoke-ExeAguardando` (stdout/stderr em arquivos, janela responsiva, `-OnTick`); `Invoke-PnpUtil` passou a usá-lo
+- A janela **Ferramentas** monta o layout por seções e ajusta a própria altura
+
 ## [1.1.6] - 2026-11-11
 
 ### Adicionado

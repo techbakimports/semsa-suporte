@@ -2,7 +2,7 @@
 
 Ferramenta de suporte técnico em PowerShell para a **SEMSA / Manaus**. Abre uma janela (WinForms, tema escuro) que **padroniza computadores Windows** em uma única execução: fuso horário, Assistência Remota, RDP, nome do PC, domínio, conta admin, instalação de programas e certificado. Também **verifica** se a padronização já foi feita e mostra o **tipo de ativação** do Windows e do Office.
 
-**Versão:** 1.1.6 · **Plataforma:** Windows 10/11 · **PowerShell:** 5.1 · [Changelog](CHANGELOG.md)
+**Versão:** 1.1.7 · **Plataforma:** Windows 10/11 · **PowerShell:** 5.1 · [Changelog](CHANGELOG.md)
 
 ---
 
@@ -68,7 +68,7 @@ SEMSA_SUPORTE.bat
 | **Conta Admin** | Cria/ajusta a conta `admin` |
 | **Renomear PC** | Pede o novo nome e renomeia (exige reinicialização) |
 | **Ingresso Domínio** | Pede domínio, usuário e senha e ingressa (exige reinicialização) |
-| **Ferramentas** | Abre uma janela com ferramentas extras. Hoje: **Drivers** e **Registro Remoto** (veja abaixo) |
+| **Ferramentas** | Abre uma janela com ferramentas extras. Hoje: **Drivers**, **Programas** (WizTree e Transwiz) e **Registro Remoto** (veja abaixo) |
 
 ### Ferramentas > Drivers
 
@@ -78,6 +78,21 @@ SEMSA_SUPORTE.bat
 | **Importar drivers (restaurar)** | Escolha a pasta do backup; o script conta os `.inf`, pede confirmação e instala todos (`pnputil /add-driver "pasta\*.inf" /subdirs /install`). Exige Administrador. Use drivers do mesmo modelo de PC. A saída detalhada por pacote fica em `%TEMP%\SemsaSuporte_drivers_<data>.log`. Código 3010 do `pnputil` = instalado, reinício necessário |
 
 A exportação precisa do Windows 10 1607 ou superior (`pnputil /export-driver`). A janela fica responsiva durante a operação, que pode levar alguns minutos.
+
+### Ferramentas > Programas
+
+Um botão por programa. Ao clicar, o script procura o programa já instalado (atalho no Menu Iniciar, depois o `.exe` em `Arquivos de Programas`) e o abre. Se não achar, pergunta se deve instalar e instala **pelo winget**, exigindo Administrador.
+
+Cada botão mostra, logo abaixo, uma descrição curta do que a ferramenta faz.
+
+| Botão | O que faz | Pacote winget | Sem winget no PC |
+|---|---|---|---|
+| **WizTree** | Analisador de espaço em disco: mostra de forma visual e muito rápida quais pastas e arquivos ocupam mais espaço no HD/SSD | `AntibodySoftware.WizTree` | Cai no Chocolatey (`wiztree`), que é instalado antes se faltar |
+| **Transwiz** | Migração de perfil de usuário: empacota arquivos e configurações em um zip no PC de origem e restaura no PC de destino | `ForensiT.Transwiz` | Não há alternativa: o pacote do Chocolatey é de 2022 e está marcado como possivelmente quebrado. O script avisa que o winget é necessário |
+
+- O WizTree só lê o disco por completo com Administrador. O Transwiz precisa estar instalado no PC de origem e no de destino.
+- **Confira a licença** de cada programa para uso na Semsa antes de usá-los em produção (por exemplo, o Transwiz tem edição pessoal e profissional).
+- Para somar um programa à lista, acrescente uma linha em `$listFerramentas` no `suporte.ps1` (nome, ID do winget, ID do Chocolatey ou `$null`, nome do atalho, nome do executável e a descrição curta `Desc`).
 
 ### Ferramentas > Registro Remoto
 
