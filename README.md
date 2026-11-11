@@ -2,7 +2,7 @@
 
 Ferramenta de suporte técnico em PowerShell para a **SEMSA / Manaus**. Abre uma janela (WinForms, tema escuro) que **padroniza computadores Windows** em uma única execução: fuso horário, Assistência Remota, RDP, nome do PC, domínio, conta admin, instalação de programas e certificado. Também **verifica** se a padronização já foi feita e mostra o **tipo de ativação** do Windows e do Office.
 
-**Versão:** 1.1.4 · **Plataforma:** Windows 10/11 · **PowerShell:** 5.1 · [Changelog](CHANGELOG.md)
+**Versão:** 1.1.5 · **Plataforma:** Windows 10/11 · **PowerShell:** 5.1 · [Changelog](CHANGELOG.md)
 
 ---
 
@@ -171,6 +171,9 @@ O botão **VERIFICAR PADRONIZAÇÃO** não altera nada. Ele confere cada etapa e
 | 7. Programas | Procura cada um no registro de desinstalação (HKLM 64/32 bits e HKCU) pelo nome; no UltraVNC confere também o serviço `uvnc_service` e a porta **8888** |
 | 8. Certificado | Certificado padrão da Semsa (por thumbprint) e os arquivos escolhidos na janela, em `LocalMachine\Root` |
 | 9. Ativação | Windows e Office: chave, ativado, tipo |
+| 10. Windows Update | Serviço `wuauserv` desabilitado (padrão da Semsa, aplicado com o **Wub**): `[OK]` se desabilitado, `[FALTA]` se habilitado. Também mostra o serviço de reparo `WaaSMedicSvc` (`[AVISO]` se ativo, pois pode religar o Update), a política `NoAutoUpdate` e o servidor WSUS, se existirem |
+
+O Windows Update é conferido pela chave `Start` do serviço no registro (4 = desabilitado). O script só **verifica**: não desabilita nem habilita o Update.
 
 Limites: só os 9 programas da lista são conferidos (por nome); os checkboxes não influenciam a verificação; a porta 8888 do UltraVNC é o padrão da Semsa e está fixa no código.
 

@@ -32,12 +32,12 @@ powershell -ExecutionPolicy Bypass -File .\suporte.ps1
 | `Get-NomeStatusLicenca` / `ConvertTo-CanalLicenca` / `Get-ResumoLicenca` | 248-270 | Texto do status, canal (Retail/OEM/MAK/KMS) e linha `RESUMO` da licença |
 | `Get-WindowsLicenseInfo` | 277 | Licença do Windows via WMI (`SoftwareLicensingProduct`) |
 | `Get-OfficeStatus` | 299 | Licença do Office via WMI + contas Microsoft conectadas (HKEY_USERS); sem `ospp.vbs` |
-| `Get-PadronizacaoStatus` | 359 | Checklist somente leitura das etapas 1-9 (botão VERIFICAR) |
-| `Set-AdminAccount` | 533 | Cria/ajusta a conta `admin` (**sem senha, de propósito**) |
-| `Test-ComputerName` | 559 | Valida nome do PC (até 15 caracteres, sem espaços/inválidos) |
-| `Invoke-PnpUtil` | 570 | Roda o `pnputil.exe` (Sysnative em PS 32 bits), devolve código e saída (ANSI) sem congelar a janela |
-| `Export-DriversSemsa` / `Import-DriversSemsa` | 605-629 | Exporta (`/export-driver *`) e importa (`/add-driver "pasta\*.inf" /subdirs /install`) drivers de terceiros |
-| `Show-PadronizacaoGUI` | 641 | GUI WinForms dark theme — entry point único; etapas, botões, janela Ferramentas e executor `$runPkg` |
+| `Get-PadronizacaoStatus` | 359 | Checklist somente leitura das etapas 1-10 (botão VERIFICAR); a 10 é o Windows Update (esperado **desabilitado**, padrão Semsa com o Wub) |
+| `Set-AdminAccount` | 556 | Cria/ajusta a conta `admin` (**sem senha, de propósito**) |
+| `Test-ComputerName` | 582 | Valida nome do PC (até 15 caracteres, sem espaços/inválidos) |
+| `Invoke-PnpUtil` | 593 | Roda o `pnputil.exe` (Sysnative em PS 32 bits), devolve código e saída (ANSI) sem congelar a janela |
+| `Export-DriversSemsa` / `Import-DriversSemsa` | 628-652 | Exporta (`/export-driver *`) e importa (`/add-driver "pasta\*.inf" /subdirs /install`) drivers de terceiros |
+| `Show-PadronizacaoGUI` | 664 | GUI WinForms dark theme — entry point único; etapas, botões, janela Ferramentas e executor `$runPkg` |
 
 ### GUI: etapas de padronização (dentro de Show-PadronizacaoGUI)
 1. Fuso horário (Manaus)  2. Assistência Remota (registro, firewall por ID de grupo, serviços)  3. RDP
@@ -61,8 +61,8 @@ Chocolatey/Winget: Java 8 (Temurin JRE), WinRAR, VLC, Foxit Reader, PDF24, Libre
 - Execução como Administrador
 - Internet para Chocolatey/winget/ativação; rede local para domínio e, se usada, pasta Standalone
 
-## Versão atual: 1.1.4
-Mesma numeração em todos os lugares. **A cada modificação, somar 1 no último dígito** (1.1.4 -> 1.1.5 ...) em: `$script:VersaoApp` no topo do `suporte.ps1` (aparece no título da janela), cabeçalho do `README.md`, nova entrada no `CHANGELOG.md`, este arquivo, a nota do Obsidian e `project_overview.md` na memória.
+## Versão atual: 1.1.5
+Mesma numeração em todos os lugares. **A cada modificação, somar 1 no último dígito** (1.1.5 -> 1.1.6 ...) em: `$script:VersaoApp` no topo do `suporte.ps1` (aparece no título da janela), cabeçalho do `README.md`, nova entrada no `CHANGELOG.md`, este arquivo, a nota do Obsidian e `project_overview.md` na memória.
 
 ## Regras
 - Sempre testar localmente antes de atualizar o script no GitHub (é consumido via `irm | iex` em produção)

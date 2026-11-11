@@ -2,6 +2,11 @@
 
 Todas as alterações notáveis neste projeto serão documentadas neste arquivo.
 
+## [1.1.5] - 2026-11-11
+
+### Adicionado
+- **VERIFICAR PADRONIZAÇÃO, etapa 10 — Windows Update:** confere se o serviço `wuauserv` está desabilitado (padrão da Semsa, aplicado com o Wub). `[OK]` se desabilitado, `[FALTA]` se habilitado (com o tipo de início). Mostra também o serviço de reparo `WaaSMedicSvc` (`[AVISO]` se ativo, porque pode religar o Update), a política `NoAutoUpdate` e o servidor WSUS, quando existirem. Somente leitura, via registro
+
 ## [1.1.4] - 2026-11-09
 
 ### Adicionado

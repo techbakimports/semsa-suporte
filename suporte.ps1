@@ -1,5 +1,5 @@
 # Versao do script: manter igual no README, CHANGELOG e CLAUDE.md; somar 1 no ultimo digito a cada modificacao
-$script:VersaoApp = "1.1.4"
+$script:VersaoApp = "1.1.5"
 
 # Primeiro, definimos todas as funcoes
 
@@ -526,6 +526,29 @@ function Get-PadronizacaoStatus {
     } else {
         & $add $e "Office" "INFO" "nao instalado"
     }
+
+    # 10 - Windows Update (a Semsa desabilita com o Wub: esperado = servico desabilitado)
+    $e = "10. Windows Update"
+    $nomesInicio = @{ 2 = "Automatico"; 3 = "Manual"; 4 = "Desabilitado" }
+    $wuIni = (Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\wuauserv" -EA SilentlyContinue).Start
+    if ($null -eq $wuIni) {
+        & $add $e "Servico Windows Update (wuauserv)" "AVISO" "nao foi possivel ler o servico"
+    } elseif ($wuIni -eq 4) {
+        & $add $e "Servico Windows Update (wuauserv)" "OK" "desabilitado"
+        # o servico de reparo (Win10/11) pode religar o wuauserv se nao estiver desabilitado tambem
+        $medicIni = (Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\WaaSMedicSvc" -EA SilentlyContinue).Start
+        if ($null -ne $medicIni) {
+            if ($medicIni -eq 4) { & $add $e "Servico de reparo (WaaSMedicSvc)" "OK" "desabilitado" }
+            else { & $add $e "Servico de reparo (WaaSMedicSvc)" "AVISO" "ativo; pode religar o Windows Update" }
+        }
+    } else {
+        $nomeIni = if ($nomesInicio.ContainsKey([int]$wuIni)) { $nomesInicio[[int]$wuIni] } else { "inicio $wuIni" }
+        & $add $e "Servico Windows Update (wuauserv)" "FALTA" "habilitado ($nomeIni); esperado desabilitado (Wub)"
+    }
+    $auPol = (Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU" -EA SilentlyContinue).NoAutoUpdate
+    if ($auPol -eq 1) { & $add $e "Politica de atualizacao automatica" "INFO" "desativada por politica (NoAutoUpdate=1)" }
+    $wsus = (Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate" -EA SilentlyContinue).WUServer
+    if ($wsus) { & $add $e "Servidor de atualizacao (WSUS)" "INFO" "$wsus" }
 
     return @($res)
 }
